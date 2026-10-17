@@ -1,0 +1,23 @@
+import type { Module } from '../types';
+import { m11 } from './m11-co-to-siec';
+import { m12 } from './m12-urzadzenia';
+import { m13 } from './m13-media';
+import { m14 } from './m14-adresy-start';
+import { m21 } from './m21-osi';
+import { m22 } from './m22-binarnie';
+import { m23 } from './m23-ipv4';
+import { m24 } from './m24-ethernet';
+import { m31 } from './m31-transport';
+import { m32 } from './m32-podsieci';
+import { m33 } from './m33-routing';
+import { m34 } from './m34-vlan';
+import { m41 } from './m41-uslugi';
+import { m42 } from './m42-ospf';
+import { m43 } from './m43-nat-acl';
+import { m44 } from './m44-ipv6';
+import { m51 } from './m51-wifi';
+import { m52 } from './m52-redundancja';
+import { m53 } from './m53-bezpieczenstwo';
+import { m54 } from './m54-automatyzacja';
+
+export const MODULES: Module[] = [m11, m12, m13, m14, m21, m22, m23, m24, m31, m32, m33, m34, m41, m42, m43, m44, m51, m52, m53, m54];

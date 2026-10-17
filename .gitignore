@@ -1,0 +1,32 @@
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.vite/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+* 2
+* 2.*
+.idea/
+.vscode/
+CLAUDE.md
+AGENTS.md
+CLAUDE.local.md
+.claude/
+.cursor/
+.cursorrules
+.windsurfrules
+.github/copilot-instructions.md
+design-system/
+GEMINI.md
+zasady-projektu.md
+.windsurf*
+.codex/
+.gemini/
+.aider*

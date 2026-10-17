@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nie znaleziono strony | PanRouter</title>
+    <meta name="description" content="Ten adres prowadzi donikąd. Wróć do PanRouter: symulatora sieci i kursu od zera do eksperta." />
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="./favicon.ico" sizes="32x32" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <style>
+      :root {
+        --bg: #0b1016;
+        --surface: #141c26;
+        --border: #354558;
+        --text: #e8eef5;
+        --muted: #a3b3c4;
+        --accent: #2dd4bf;
+        --accent-ink: #032420;
+        --danger: #f87171;
+        --dim: #22303e;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: 24px 16px;
+        background: var(--bg);
+        background-image: radial-gradient(circle at 1px 1px, var(--dim) 1px, transparent 0);
+        background-size: 24px 24px;
+        color: var(--text);
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        letter-spacing: -0.02em;
+      }
+      main { max-width: 560px; display: grid; gap: 20px; }
+      code { color: var(--danger); font-family: ui-monospace, Menlo, monospace; }
+      strong { font-size: 120px; line-height: 1; letter-spacing: -0.06em; color: var(--dim); }
+      h1 { margin: 0; font-size: 36px; line-height: 1.1; letter-spacing: -0.05em; }
+      p { margin: 0; color: var(--muted); line-height: 1.6; }
+      a {
+        justify-self: start;
+        display: inline-flex;
+        align-items: center;
+        min-height: 48px;
+        padding: 0 22px;
+        border-radius: 10px;
+        background: var(--accent);
+        color: var(--accent-ink);
+        font-weight: 700;
+        text-decoration: none;
+      }
+      a:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <code>Destination host unreachable</code>
+      <strong aria-hidden="true">404</strong>
+      <h1>Ten adres prowadzi donikąd</h1>
+      <p>Pakiet trafił pod adres, którego nie ma w tablicy routingu. Wróć na stronę główną PanRouter.</p>
+      <a href="./">Wróć na stronę główną</a>
+    </main>
+  </body>
+</html>
