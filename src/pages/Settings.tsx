@@ -1,7 +1,8 @@
-import { Download, RotateCcw, Upload } from 'lucide-preact';
+import { CircleCheck, Download, MonitorSmartphone, RotateCcw, Share, Upload, WifiOff } from 'lucide-preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { LangSwitch } from '../app/Shell';
 import { setMeta } from '../app/meta';
+import { installed, installPrompt, isIos, offlineReady, promptInstall } from '../app/pwa';
 import { tx } from '../i18n';
 import { exportProgress, importProgress, progress, resetProgress, update } from '../state/progress';
 import { toast } from '../ui/toast';
@@ -87,6 +88,7 @@ export function Settings() {
             </select>
           </div>
         </section>
+        <InstallCard />
         <section class="card stack">
           <h4>{tx('Kopia zapasowa', 'Backup')}</h4>
           <p class="muted small">{tx('Postęp i zapisane sieci są tylko w tej przeglądarce. Pobierz plik, żeby przenieść je na inny komputer.', 'Progress and saved networks live only in this browser. Download a file to move them to another computer.')}</p>
@@ -114,5 +116,39 @@ export function Settings() {
         </section>
       </div>
     </div>
+  );
+}
+
+function InstallCard() {
+  const status = installed.value
+    ? tx('Aplikacja jest zainstalowana na tym urządzeniu.', 'The app is installed on this device.')
+    : tx('Zainstaluj PanRouter jak zwykłą aplikację: osobne okno, ikona na ekranie i nauka bez internetu.', 'Install PanRouter like a regular app: its own window, an icon on your screen and learning without internet.');
+  return (
+    <section class="card stack">
+      <h4>{tx('Aplikacja i tryb offline', 'App and offline mode')}</h4>
+      <p class="muted small">{status}</p>
+      <p class="status-line small">
+        {offlineReady.value ? <CircleCheck aria-hidden="true" class="ok" /> : <WifiOff aria-hidden="true" class="dim" />}
+        {offlineReady.value
+          ? tx('Wszystkie lekcje, laboratoria i gry są zapisane w przeglądarce i działają bez internetu.', 'All lessons, labs and games are stored in the browser and work without internet.')
+          : tx('Tryb offline włączy się po pierwszym wczytaniu wersji opublikowanej w sieci.', 'Offline mode turns on after the first load of the published version.')}
+      </p>
+      {!installed.value && installPrompt.value && (
+        <div>
+          <button type="button" class="btn btn-primary" onClick={() => void promptInstall()}>
+            <MonitorSmartphone aria-hidden="true" />
+            {tx('Zainstaluj PanRouter', 'Install PanRouter')}
+          </button>
+        </div>
+      )}
+      {!installed.value && !installPrompt.value && (
+        <p class="muted small status-line">
+          <Share aria-hidden="true" />
+          {isIos()
+            ? tx('Na iPhonie i iPadzie: w Safari dotknij Udostępnij, a potem Do ekranu początkowego.', 'On iPhone and iPad: in Safari tap Share, then Add to Home Screen.')
+            : tx('W menu przeglądarki wybierz Zainstaluj aplikację albo Dodaj do ekranu głównego.', 'In the browser menu choose Install app or Add to Home screen.')}
+        </p>
+      )}
+    </section>
   );
 }

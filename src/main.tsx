@@ -10,5 +10,7 @@ import './styles/sim.css';
 import './styles/learn.css';
 import { render } from 'preact';
 import { App } from './app/App';
+import { setupPwa } from './app/pwa';
 
+setupPwa();
 render(<App />, document.getElementById('app')!);

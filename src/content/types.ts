@@ -91,6 +91,10 @@ export interface LabContext {
   arpHas: (name: string, ip: string) => boolean;
   macKnows: (switchName: string, deviceName: string) => boolean;
   inSubnet: (ip: string, cidr: string) => boolean;
+  sim: import('../sim/engine').Simulator;
+  fork: () => LabContext;
+  unplug: (name: string, port: string) => void;
+  plug: (a: string, aPort: string, b: string, bPort: string) => void;
 }
 
 export interface Lab {

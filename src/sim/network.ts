@@ -1,5 +1,5 @@
 import { modelOf, portGroupName } from './catalog';
-import type { CableType, Device, DeviceKind, Link, LinkEnd, Network, Port, VirtualIf } from './types';
+import type { CableType, Device, DeviceKind, Link, LinkEnd, Network, Port, PortSecurity, VirtualIf } from './types';
 
 export const INTERNET_DNS = '198.51.100.53';
 export const INTERNET_WEB = '198.51.100.80';
@@ -60,7 +60,17 @@ export function blankPort(name: string, short: string, mac: string): Port {
     aclIn: '',
     aclOut: '',
     ospfCost: 0,
+    fhrp: null,
+    portSecurity: blankPortSecurity(),
+    errDisabled: false,
+    dhcpTrust: false,
+    channelGroup: 0,
+    channelMode: '',
   };
+}
+
+export function blankPortSecurity(): PortSecurity {
+  return { enabled: false, maximum: 1, violation: 'shutdown', sticky: false, macs: [], stickyMacs: [] };
 }
 
 export function blankVif(kind: VirtualIf['kind'], name: string, parent = '', vlan = 0): VirtualIf {
@@ -78,6 +88,7 @@ export function blankVif(kind: VirtualIf['kind'], name: string, parent = '', vla
     aclIn: '',
     aclOut: '',
     ospfCost: 0,
+    fhrp: null,
   };
 }
 
@@ -128,6 +139,7 @@ export function createDevice(net: Network, kind: DeviceKind, x: number, y: numbe
     wifiClient: null,
     fwRules: [],
     stpPriority: 32768,
+    dhcpSnooping: { enabled: false, vlans: [] },
     banner: '',
     mgmt: {
       enableSecret: '',

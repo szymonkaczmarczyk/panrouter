@@ -189,7 +189,6 @@ export const m11: Module = {
       kind: 'input',
       q: l('Ile bitów ma jeden bajt?', 'How many bits are in one byte?'),
       answer: ['8'],
-      placeholder: '8',
       explain: l('Bajt to 8 bitów. Dlatego 1 Gb/s to teoretycznie 125 MB/s.', 'A byte is 8 bits. That is why 1 Gb/s is about 125 MB/s in theory.'),
     },
     {

@@ -96,7 +96,19 @@ const icon = async (size) => {
   return data;
 };
 
+const maskable = async (size) => {
+  const p = await browser.newPage({ viewport: { width: size, height: size } });
+  const inner = Math.round(size * 0.62);
+  await p.setContent(`<html><body style="margin:0;width:${size}px;height:${size}px;display:grid;place-items:center;background:#0b1016">${mark(inner)}</body></html>`);
+  const data = await p.screenshot();
+  await p.close();
+  return data;
+};
+
 writeFileSync(`${root}public/apple-touch-icon.png`, await icon(180));
+writeFileSync(`${root}public/icon-192.png`, await icon(192));
+writeFileSync(`${root}public/icon-512.png`, await icon(512));
+writeFileSync(`${root}public/icon-maskable-512.png`, await maskable(512));
 const sizes = [16, 32, 48];
 const pngs = [];
 for (const size of sizes) pngs.push({ size, data: await icon(size) });

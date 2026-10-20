@@ -190,7 +190,7 @@ export const m14: Module = {
       kind: 'input',
       q: l('Zapisz maskę 255.255.255.0 w skrócie CIDR (np. /16).', 'Write the mask 255.255.255.0 in CIDR notation (e.g. /16).'),
       answer: ['/24', '24'],
-      placeholder: '/24',
+      placeholder: '/xx',
       explain: l('Maska ma 24 jedynki: trzy pełne oktety po 8 bitów.', 'The mask has 24 ones: three full octets of 8 bits.'),
     },
   ],

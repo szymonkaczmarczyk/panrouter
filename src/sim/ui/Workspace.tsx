@@ -1,14 +1,18 @@
-import { Cable, Download, FolderOpen, Hand, LayoutTemplate, Mail, Maximize, MousePointer2, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-preact';
+import { Cable, Copy, Download, FolderOpen, Hand, ImageDown, LayoutTemplate, Link2, Mail, Maximize, MousePointer2, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { tr, tx } from '../../i18n';
+import { Dialog } from '../../ui/Dialog';
 import { toast } from '../../ui/toast';
 import { modelOf } from '../catalog';
+import { normalizeNetwork } from '../normalize';
+import { encodeNetwork, shareUrl } from '../share';
 import { TEMPLATES } from '../templates';
 import type { Network } from '../types';
 import { Canvas, stepTimes, type View } from './Canvas';
 import type { CableChoice, SimController, Tool } from './controller';
 import { DevicePanel } from './DevicePanel';
+import { renderNetworkPng } from './exportImage';
 import { EventPanel } from './EventPanel';
 import { Palette } from './Palette';
 
@@ -43,6 +47,7 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
   const canvasRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>({ x: -60, y: -40, zoom: 1 });
   const [menu, setMenu] = useState(false);
+  const [shareLink, setShareLink] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const mode = ctrl.mode.value;
   const tool = ctrl.tool.value;
@@ -58,7 +63,7 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
   useEffect(() => {
     const id = window.setTimeout(fit, 30);
     return () => window.clearTimeout(id);
-  }, [ctrl]);
+  }, [ctrl, ctrl.net]);
 
   const setTool = (next: Tool) => {
     ctrl.tool.value = next;
@@ -142,15 +147,44 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
     };
   }, [menu]);
 
-  const exportNet = () => {
-    const blob = new Blob([JSON.stringify(ctrl.net, null, 2)], { type: 'application/json' });
+  const download = (blob: Blob, name: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `siec-${new Date().toISOString().slice(0, 10)}.panrouter.json`;
+    a.download = name;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const exportNet = () => {
+    download(new Blob([JSON.stringify(ctrl.net, null, 2)], { type: 'application/json' }), `siec-${new Date().toISOString().slice(0, 10)}.panrouter.json`);
     setMenu(false);
+  };
+
+  const copyShareLink = async () => {
+    setMenu(false);
+    if (!ctrl.net.devices.length) return toast(tx('Plansza jest pusta. Dodaj urządzenia, zanim udostępnisz sieć.', 'The canvas is empty. Add devices before sharing the network.'), 'warn');
+    const url = shareUrl(await encodeNetwork(ctrl.net));
+    try {
+      await navigator.clipboard.writeText(url);
+      toast(tx('Skopiowano link. Kto go otworzy, zobaczy tę sieć u siebie.', 'Link copied. Whoever opens it will see this network.'), 'ok');
+      if (url.length > 30_000) toast(tx('Link jest bardzo długi. Jeśli komunikator go utnie, wyślij sieć jako plik.', 'The link is very long. If a messenger cuts it, send the network as a file.'), 'warn', 6000);
+    } catch {
+      setShareLink(url);
+    }
+  };
+
+  const savePng = async () => {
+    setMenu(false);
+    const svg = canvasRef.current?.querySelector<SVGSVGElement>('svg.canvas');
+    if (!svg || !ctrl.net.devices.length) return toast(tx('Plansza jest pusta. Nie ma czego zapisać.', 'The canvas is empty. There is nothing to save.'), 'warn');
+    try {
+      const blob = await renderNetworkPng(svg, ctrl.net, 'PanRouter');
+      download(blob, `siec-${new Date().toISOString().slice(0, 10)}.png`);
+      toast(tx('Zapisano obraz planszy.', 'Canvas image saved.'), 'ok');
+    } catch {
+      toast(tx('Nie udało się utworzyć obrazu. Spróbuj ponownie albo w innej przeglądarce.', 'Could not create the image. Try again or use another browser.'), 'danger');
+    }
   };
 
   const importNet = async (event: Event) => {
@@ -161,9 +195,8 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
     if (!file) return;
     if (file.size > 3_000_000) return toast(tx('Plik jest za duży (limit 3 MB).', 'The file is too large (3 MB limit).'), 'danger');
     try {
-      const net = JSON.parse(await file.text()) as Network;
-      if (net.version !== 1 || !Array.isArray(net.devices) || !Array.isArray(net.links) || net.devices.some((d) => !d.id || !d.kind || !Array.isArray(d.ports))) throw new Error('format');
-      net.devices.forEach((d) => modelOf(d.kind));
+      const net = normalizeNetwork(JSON.parse(await file.text()));
+      if (!net) throw new Error('format');
       ctrl.load(net);
       fit();
       toast(tx('Wczytano sieć z pliku.', 'Network loaded from file.'), 'ok');
@@ -261,6 +294,15 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
                   <Upload aria-hidden="true" />
                   <span>{tx('Wczytaj sieć z pliku', 'Load network from file')}</span>
                 </button>
+                <div class="menu-sep" />
+                <button type="button" role="menuitem" onClick={() => void copyShareLink()}>
+                  <Link2 aria-hidden="true" />
+                  <span>{tx('Kopiuj link do tej sieci', 'Copy a link to this network')}</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => void savePng()}>
+                  <ImageDown aria-hidden="true" />
+                  <span>{tx('Zapisz obraz planszy (PNG)', 'Save canvas image (PNG)')}</span>
+                </button>
               </div>
             )}
             <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={importNet} />
@@ -308,6 +350,28 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
         </div>
         {ctrl.panel.value ? <DevicePanel ctrl={ctrl} locked={locked} /> : mode === 'simulation' ? <EventPanel ctrl={ctrl} /> : null}
       </div>
+      {shareLink && (
+        <Dialog
+          title={tx('Link do sieci', 'Network link')}
+          onClose={() => setShareLink(null)}
+          actions={
+            <button
+              type="button"
+              class="btn btn-primary"
+              onClick={(event) => {
+                const input = (event.currentTarget as HTMLElement).closest('dialog')?.querySelector('input');
+                input?.select();
+              }}
+            >
+              <Copy aria-hidden="true" />
+              {tx('Zaznacz link', 'Select the link')}
+            </button>
+          }
+        >
+          <p>{tx('Przeglądarka nie pozwoliła skopiować automatycznie. Zaznacz link i skopiuj go skrótem Ctrl+C (na Macu Cmd+C).', 'The browser did not allow automatic copying. Select the link and copy it with Ctrl+C (Cmd+C on a Mac).')}</p>
+          <input class="input mono" readOnly value={shareLink} aria-label={tx('Link do sieci', 'Network link')} onFocus={(event) => (event.currentTarget as HTMLInputElement).select()} />
+        </Dialog>
+      )}
     </div>
   );
 }

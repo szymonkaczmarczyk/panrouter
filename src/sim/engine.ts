@@ -57,6 +57,16 @@ interface DevState {
   dnsForward: Map<number, { client: number; sport: number; id: number; name: string; via: number }>;
   inbox: InboxItem[];
   counters: { icmpId: number; port: number; xid: number; dnsId: number };
+  secure: Map<string, string[]>;
+  violations: Map<string, { count: number; last: string }>;
+  snooping: Map<string, SnoopBinding>;
+}
+
+export interface SnoopBinding {
+  mac: string;
+  ip: number;
+  vlan: number;
+  port: string;
 }
 
 export type EchoOutcome = 'reply' | 'timeout' | 'host-unreachable' | 'net-unreachable' | 'admin-prohibited' | 'ttl-expired' | 'no-route' | 'no-ip';
@@ -130,6 +140,7 @@ export class Simulator {
   private current: TraceEvent | null = null;
   private outNotes: Explain[] = [];
   storm = false;
+  dirty = false;
   onTrace: ((events: TraceEvent[]) => void) | null = null;
 
   constructor(net: Network) {
@@ -149,6 +160,7 @@ export class Simulator {
       st.pending = [];
       st.nat = [];
       st.sessions.clear();
+      st.secure.clear();
     }
   }
 
@@ -173,6 +185,9 @@ export class Simulator {
         dnsForward: new Map(),
         inbox: [],
         counters: { icmpId: (Number(device.id.replace(/\D/g, '')) * 97) % 30000 + 1, port: 49152, xid: 0x1000, dnsId: 1 },
+        secure: new Map(),
+        violations: new Map(),
+        snooping: new Map(),
       };
       this.state.set(device.id, st);
     }
@@ -339,8 +354,68 @@ export class Simulator {
     else this.routedReceive(device, port, frame);
   }
 
+  secureMacs(device: Device, port: Port): string[] {
+    return [...port.portSecurity.macs, ...port.portSecurity.stickyMacs, ...(this.st(device).secure.get(port.name) ?? [])];
+  }
+
+  violation(device: Device, port: Port): { count: number; last: string } {
+    return this.st(device).violations.get(port.name) ?? { count: 0, last: '' };
+  }
+
+  snoopingBindings(device: Device): SnoopBinding[] {
+    return [...this.st(device).snooping.values()];
+  }
+
+  private portSecurityAllows(device: Device, port: Port, mac: string): boolean {
+    const sec = port.portSecurity;
+    if (!sec.enabled || port.mode !== 'access') return true;
+    const known = this.secureMacs(device, port);
+    if (known.includes(mac)) return true;
+    const st = this.st(device);
+    if (known.length < sec.maximum) {
+      if (sec.sticky) {
+        sec.stickyMacs.push(mac);
+        this.dirty = true;
+      } else st.secure.set(port.name, [...(st.secure.get(port.name) ?? []), mac]);
+      this.note(sec.sticky ? 'psec.sticky' : 'psec.learn', { mac, port: port.short });
+      return true;
+    }
+    const record = this.violation(device, port);
+    st.violations.set(port.name, { count: record.count + 1, last: mac });
+    if (sec.violation === 'shutdown') {
+      port.errDisabled = true;
+      this.dirty = true;
+      this.drop('psec.shutdown', { mac, port: port.short, max: sec.maximum });
+      this.refresh();
+      return false;
+    }
+    this.drop(sec.violation === 'restrict' ? 'psec.restrict' : 'psec.protect', { mac, port: port.short });
+    return false;
+  }
+
+  private snoopingAllows(device: Device, port: Port, vlan: number, frame: Frame): boolean {
+    const snooping = device.dhcpSnooping;
+    const dhcp = frame.ip?.udp?.dhcp;
+    if (!dhcp || !snooping.enabled || !snooping.vlans.includes(vlan)) return true;
+    const fromServer = dhcp.op === 'offer' || dhcp.op === 'ack' || dhcp.op === 'nak';
+    if (!fromServer) return true;
+    if (!port.dhcpTrust) {
+      this.drop('snoop.untrusted', { port: port.short, op: dhcp.op.toUpperCase() });
+      return false;
+    }
+    if (dhcp.op === 'ack' && dhcp.yiaddr) {
+      const st = this.st(device);
+      const client = st.mac.get(`${vlan}|${dhcp.chaddr}`);
+      st.snooping.set(dhcp.chaddr, { mac: dhcp.chaddr, ip: dhcp.yiaddr, vlan, port: client?.port ?? '' });
+      this.note('snoop.binding', { mac: dhcp.chaddr, ip: ipToStr(dhcp.yiaddr) });
+    }
+    return true;
+  }
+
   private l2Receive(device: Device, port: Port, frame: Frame): void {
     if (this.topo.stpBlocked(device.id, port.name)) return this.drop('stp.blocked', { port: port.short });
+    if (this.topo.memberInactive(device.id, port.name)) return this.drop('lacp.inactive', { port: port.short });
+    if (!this.portSecurityAllows(device, port, frame.src)) return;
     const vlan = this.topo.ingressVlan(device, port, frame.vlan);
     if (vlan === null) {
       if (port.mode === 'access' && frame.vlan !== null) return this.drop('l2.taggedOnAccess', { port: port.short, vlan: frame.vlan });
@@ -356,17 +431,17 @@ export class Simulator {
     const known = st.mac.get(key);
     if (!known || known.port !== port.name) {
       st.mac.set(key, { port: port.name, vlan, mac: frame.src });
-      this.note('l2.learn', { mac: frame.src, port: port.short, vlan });
+      this.note('l2.learn', { mac: frame.src, port: this.topo.portLabel(device, port.name), vlan });
     }
+    if (!this.snoopingAllows(device, port, vlan, frame)) return;
     const local = { ...frame, vlan: null };
-    if (frame.dst === device.baseMac) {
-      const svi = this.sviFor(device, vlan);
+    const svi = this.sviFor(device, vlan);
+    if (frame.dst === device.baseMac || (svi && this.topo.virtualFor(device, svi)?.mac === frame.dst)) {
       if (svi) return this.l3Receive(device, svi, local);
       return this.drop('l2.noSvi', { vlan });
     }
     this.l2Forward(device, vlan, frame, port.name);
     if (frame.dst === BROADCAST_MAC) {
-      const svi = this.sviFor(device, vlan);
       if (!svi) return;
       const outcome = this.current?.outcome;
       this.l3Receive(device, svi, local);
@@ -393,7 +468,7 @@ export class Simulator {
       if (entry.port === ingress) return this.drop('l2.filter', { mac: frame.dst });
       const out = ports.find((p) => p.name === entry.port);
       if (out) {
-        this.note('l2.forwardKnown', { mac: frame.dst, port: out.short });
+        this.note('l2.forwardKnown', { mac: frame.dst, port: this.topo.portLabel(device, out.name) });
         send(out);
         return;
       }
@@ -417,7 +492,8 @@ export class Simulator {
 
   private l3Receive(device: Device, entry: L3If, frame: Frame): void {
     if (!entry.up) return this.drop('l3.ifDown', { iface: entry.name });
-    if (frame.dst !== entry.mac && frame.dst !== BROADCAST_MAC) return this.drop('l3.notMyMac', { mac: frame.dst });
+    const virtual = this.topo.virtualFor(device, entry);
+    if (frame.dst !== entry.mac && frame.dst !== BROADCAST_MAC && frame.dst !== virtual?.mac) return this.drop('l3.notMyMac', { mac: frame.dst });
     if (frame.type === 'arp') return this.arpReceive(device, entry, frame);
     if (frame.ip) this.ipReceive(device, entry, frame.ip);
   }
@@ -426,6 +502,21 @@ export class Simulator {
     const arp = frame.arp!;
     const st = this.st(device);
     if (arp.op === 'request') {
+      const virtual = this.topo.virtualFor(device, entry);
+      if (virtual && arp.targetIp === virtual.ip) {
+        st.arp.set(arp.senderIp, { mac: arp.senderMac, ifName: entry.name });
+        const state = this.topo.fhrpOf(device, entry)!;
+        this.note('fhrp.arpReply', { ip: ipToStr(virtual.ip), mac: virtual.mac, proto: state.proto.toUpperCase(), group: state.group });
+        this.l3Transmit(device, entry, {
+          src: virtual.mac,
+          dst: arp.senderMac,
+          vlan: null,
+          type: 'arp',
+          arp: { op: 'reply', senderMac: virtual.mac, senderIp: virtual.ip, targetMac: arp.senderMac, targetIp: arp.senderIp },
+        });
+        this.flushPending(device, arp.senderIp);
+        return;
+      }
       if (entry.ip !== null && arp.targetIp === entry.ip) {
         st.arp.set(arp.senderIp, { mac: arp.senderMac, ifName: entry.name });
         this.note('arp.requestForMe', { ip: ipToStr(arp.targetIp), mac: entry.mac });

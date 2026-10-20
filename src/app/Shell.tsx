@@ -23,6 +23,7 @@ import { RANK_THRESHOLDS, rankIndex, xp } from '../state/progress';
 import { LogoMark } from '../ui/Logo';
 import { ToastRegion } from '../ui/toast';
 import { href, path } from './router';
+import { UpdateBanner } from './UpdateBanner';
 
 interface NavItem {
   to: string;
@@ -220,6 +221,7 @@ export function Shell({ children, wide }: { children: ComponentChildren; wide: b
           {t('nav.more')}
         </button>
       </nav>
+      <UpdateBanner />
       <ToastRegion />
     </div>
   );

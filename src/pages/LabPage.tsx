@@ -7,6 +7,7 @@ import { Blocks } from '../content/Blocks';
 import { makeLabContext } from '../content/labs/context';
 import type { Lab } from '../content/types';
 import { lang, tr, tx } from '../i18n';
+import { normalizeNetwork } from '../sim/normalize';
 import { SimController } from '../sim/ui/controller';
 import { Workspace } from '../sim/ui/Workspace';
 import { progress, recordLab, saveLabNet } from '../state/progress';
@@ -122,7 +123,7 @@ export function LabPage({ id }: { id: string }) {
   const ctrl = useMemo(() => {
     if (!lab) return null;
     const saved = progress.value.labNets[lab.id];
-    return new SimController(saved ? structuredClone(saved) : lab.build(), (net) => saveLabNet(lab.id, net));
+    return new SimController((saved && normalizeNetwork(saved)) || lab.build(), (net) => saveLabNet(lab.id, net));
   }, [id]);
 
   useEffect(() => {

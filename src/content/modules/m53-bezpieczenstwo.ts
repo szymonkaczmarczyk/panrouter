@@ -11,7 +11,7 @@ export const m53: Module = {
     'Segmentacja, zabezpieczenie przełączników, bezpieczne zarządzanie przez SSH, VPN IPsec i WireGuard, ZTNA i SASE.',
     'Segmentation, switch hardening, secure management over SSH, IPsec and WireGuard VPNs, ZTNA and SASE.',
   ),
-  labs: ['ssh', 'zapora'],
+  labs: ['ssh', 'zapora', 'port-security', 'dhcp-snooping'],
   games: ['detektyw-sieci'],
   sections: [
     {
@@ -30,6 +30,20 @@ export const m53: Module = {
               ['Wyłączone nieużywane porty', 'port w nieużywanym VLAN-ie i w stanie shutdown nie wpuści nikogo'],
             ],
           },
+          {
+            t: 'code',
+            lines: [
+              'SW1(config)# interface g1/0/1',
+              'SW1(config-if)# switchport port-security',
+              'SW1(config-if)# switchport port-security mac-address sticky',
+              'SW1(config-if)# exit',
+              'SW1(config)# ip dhcp snooping',
+              'SW1(config)# ip dhcp snooping vlan 1',
+              'SW1(config)# interface g1/0/24',
+              'SW1(config-if)# ip dhcp snooping trust',
+            ],
+            caption: 'Port security pilnuje, kto jest podłączony do gniazdka. DHCP snooping pilnuje, kto rozdaje adresy.',
+          },
         ],
         en: [
           { t: 'p', text: 'A flat network where everyone sees everyone lets a threat spread in minutes. **Segmentation** splits the network into zones with controlled traffic between them: users, servers, cameras, printers, guests, production systems. Microsegmentation goes further: rules even between individual servers.' },
@@ -42,6 +56,20 @@ export const m53: Module = {
               ['Dynamic ARP Inspection', 'blocks forged ARP replies using the DHCP snooping table'],
               ['Disabled unused ports', 'a port in an unused VLAN and shut down lets nobody in'],
             ],
+          },
+          {
+            t: 'code',
+            lines: [
+              'SW1(config)# interface g1/0/1',
+              'SW1(config-if)# switchport port-security',
+              'SW1(config-if)# switchport port-security mac-address sticky',
+              'SW1(config-if)# exit',
+              'SW1(config)# ip dhcp snooping',
+              'SW1(config)# ip dhcp snooping vlan 1',
+              'SW1(config)# interface g1/0/24',
+              'SW1(config-if)# ip dhcp snooping trust',
+            ],
+            caption: 'Port security controls who is plugged into the socket. DHCP snooping controls who hands out addresses.',
           },
         ],
       },
@@ -140,5 +168,7 @@ export const m53: Module = {
     { id: 'q53-6', kind: 'single', q: l('Czym różni się ZTNA od klasycznego VPN?', 'How does ZTNA differ from a classic VPN?'), options: [l('Daje dostęp do konkretnych aplikacji, a nie całej sieci', 'It grants access to specific apps, not the whole network'), l('Jest zawsze wolniejsze', 'It is always slower'), l('Nie szyfruje', 'It does not encrypt'), l('Działa tylko w LAN', 'It works only on the LAN')], answer: 0, explain: l('ZTNA ogranicza dostęp do potrzebnych aplikacji i sprawdza każde połączenie.', 'ZTNA limits access to needed apps and checks every connection.') },
     { id: 'q53-7', kind: 'multi', q: l('Co należy do minimum bezpieczeństwa routera? Wybierz wszystkie.', 'What belongs to a router’s security baseline? Select all.'), options: [l('SSH v2', 'SSH v2'), l('enable secret', 'enable secret'), l('Telnet z hasłem cisco', 'Telnet with password cisco'), l('Automatyczne wylogowanie (exec-timeout)', 'Automatic logout (exec-timeout)')], answer: [0, 1, 3], explain: l('SSH, hasła jako skróty i wylogowanie to podstawa. Telnet i domyślne hasła nigdy.', 'SSH, hashed secrets and timeouts are basics. Never Telnet or default passwords.') },
     { id: 'q53-8', kind: 'single', q: l('Czy możesz skanować porty serwera sąsiedniej firmy, żeby ćwiczyć?', 'May you scan a neighboring company’s server ports for practice?'), options: [l('Tak, jeśli jest w internecie', 'Yes, if it is on the internet'), l('Nie, tylko własne systemy albo za pisemną zgodą', 'No, only your own systems or with written permission')], answer: 1, explain: l('Ćwicz w laboratorium i na własnym sprzęcie. Bez zgody to łamanie prawa.', 'Practice in labs and on your own gear. Without consent it breaks the law.') },
+    { id: 'q53-9', kind: 'single', q: l('Port ma port security z limitem 1 adresu i reakcją shutdown. Co się stanie po podłączeniu obcego laptopa?', 'A port has port security with a limit of 1 address and shutdown mode. What happens when a stranger’s laptop is plugged in?'), options: [l('Port przejdzie w stan err-disabled', 'The port goes err-disabled'), l('Laptop dostanie VLAN gości', 'The laptop gets the guest VLAN'), l('Przełącznik dopisze laptop jako drugi adres', 'The switch adds the laptop as a second address'), l('Nic, port security działa tylko na trunkach', 'Nothing, port security only works on trunks')], answer: 0, explain: l('Przekroczenie limitu przy reakcji shutdown wyłącza port. Przywraca go shutdown i no shutdown.', 'Exceeding the limit in shutdown mode disables the port. shutdown and no shutdown bring it back.') },
+    { id: 'q53-10', kind: 'single', q: l('Który port oznaczasz jako zaufany przy DHCP snooping?', 'Which port do you mark as trusted for DHCP snooping?'), options: [l('Port w stronę prawdziwego serwera DHCP', 'The port towards the real DHCP server'), l('Każdy port z komputerem', 'Every port with a computer'), l('Port, za którym jest fałszywy serwer', 'The port behind the rogue server'), l('Żaden, snooping nie używa zaufanych portów', 'None, snooping does not use trusted ports')], answer: 0, explain: l('Odpowiedzi DHCP przechodzą tylko przez porty zaufane. Reszta jest domyślnie niezaufana.', 'DHCP replies pass only through trusted ports. All others are untrusted by default.') },
   ],
 };

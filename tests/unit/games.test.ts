@@ -25,6 +25,15 @@ describe('content', () => {
     expect(MODULES).toHaveLength(20);
   });
 
+  it('never reveals the answer in an input placeholder', () => {
+    const normalize = (text: string) => text.trim().toLowerCase().replace(/\s+/g, ' ').replace(/,/g, '.').replace(/^\//, '');
+    for (const q of MODULES.flatMap((m) => m.quiz)) {
+      if (q.kind !== 'input' || !q.placeholder) continue;
+      const hint = normalize(q.placeholder);
+      expect(q.answer.map(normalize), q.id).not.toContain(hint);
+    }
+  });
+
   it('avoids em dashes in all content', () => {
     const text = JSON.stringify(MODULES);
     expect(text.includes('\u2014')).toBe(false);

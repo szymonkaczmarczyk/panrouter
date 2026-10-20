@@ -21,6 +21,11 @@ export function navigate(to: string): void {
   window.location.hash = to;
 }
 
+export function replacePath(to: string): void {
+  window.history.replaceState(window.history.state, '', `#${to}`);
+  path.value = to;
+}
+
 export function href(to: string): string {
   return `#${to}`;
 }

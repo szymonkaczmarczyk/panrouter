@@ -1,6 +1,7 @@
 import { Simulator } from '../../sim/engine';
 import { inSubnet, parseCidr, parseIp } from '../../sim/ip';
-import { findDeviceByName } from '../../sim/network';
+import { portByName } from '../../sim/builder';
+import { connect, findDeviceByName } from '../../sim/network';
 import type { Network } from '../../sim/types';
 import type { LabContext } from '../types';
 
@@ -21,8 +22,24 @@ export function makeLabContext(net: Network, live: Simulator): LabContext {
     if (!device) return null;
     return sim.topo.l3Ifs(device).find((e) => e.ip !== null && e.up && e.attach.kind !== 'loop')?.ip ?? null;
   };
-  return {
+  const ctx: LabContext = {
     net: copy,
+    sim,
+    fork: () => makeLabContext(copy, live),
+    unplug: (name, portName) => {
+      const d = dev(name);
+      const p = port(name, portName);
+      if (!d || !p) return;
+      copy.links = copy.links.filter((l) => !((l.a.dev === d.id && l.a.port === p.name) || (l.b.dev === d.id && l.b.port === p.name)));
+      sim.invalidate();
+    },
+    plug: (a, aPort, b, bPort) => {
+      const da = dev(a);
+      const db = dev(b);
+      if (!da || !db) return;
+      connect(copy, { dev: da.id, port: portByName(da, aPort).name }, { dev: db.id, port: portByName(db, bPort).name }, 'copper');
+      sim.invalidate();
+    },
     device: dev,
     port,
     ping: (from, to) => {
@@ -92,4 +109,5 @@ export function makeLabContext(net: Network, live: Simulator): LabContext {
       return Boolean(value !== null && parsed && inSubnet(value, parsed.ip, parsed.prefix));
     },
   };
+  return ctx;
 }

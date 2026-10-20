@@ -3,7 +3,7 @@ import { ANY, hostSpec } from '../acl';
 import type { Simulator } from '../engine';
 import { broadcastOf, ipToStr, maskToPrefix, networkOf, parseIp } from '../ip';
 import { blankVif } from '../network';
-import type { Acl, AclEntry, AddrSpec, Device, Port, PortMatch, VirtualIf } from '../types';
+import type { Acl, AclEntry, AddrSpec, ChannelMode, Device, FhrpGroup, FhrpProto, Port, PortMatch, VirtualIf, ViolationMode } from '../types';
 import { resolveIface } from './iface';
 import { buildTrie, completeLine, helpFor, parse, tokenize, type Args, type CommandDef, type Mode, type TrieNode } from './parser';
 import * as show from './show';
@@ -350,6 +350,15 @@ const showDefs: [string, (ctx: Ctx, args: Args) => string[], Device['kind'][]?, 
   ['show access-lists', (c) => show.showAccessLists(c.sim, c.device)],
   ['show ip access-lists', (c) => show.showAccessLists(c.sim, c.device)],
   ['show spanning-tree', (c) => show.showSpanningTree(c.sim, c.device), [...SWITCHES]],
+  ['show port-security', (c) => show.showPortSecurity(c.sim, c.device), [...SWITCHES]],
+  ['show port-security interface <iface:if>', (c, a) => show.showPortSecurityInterface(c.sim, c.device, a.if as string), [...SWITCHES]],
+  ['show ip dhcp snooping', (c) => show.showDhcpSnooping(c.sim, c.device), [...SWITCHES]],
+  ['show ip dhcp snooping binding', (c) => show.showDhcpSnoopingBinding(c.sim, c.device), [...SWITCHES]],
+  ['show etherchannel summary', (c) => show.showEtherchannelSummary(c.sim, c.device), [...SWITCHES]],
+  ['show vrrp', (c) => show.showVrrpBrief(c.sim, c.device), [...ROUTERS]],
+  ['show vrrp brief', (c) => show.showVrrpBrief(c.sim, c.device), [...ROUTERS]],
+  ['show standby', (c) => show.showStandbyBrief(c.sim, c.device), [...ROUTERS]],
+  ['show standby brief', (c) => show.showStandbyBrief(c.sim, c.device), [...ROUTERS]],
   ['show version', (c) => show.showVersion(c.sim, c.device)],
   ['show clock', () => show.showClock()],
   ['show lldp neighbors', (c) => show.showLldp(c.sim, c.device)],
@@ -366,6 +375,13 @@ def(['config'], 'hostname <word:name>', (ctx, a) => {
 def(['config'], 'interface <ifnew:if>', (ctx, a) => {
   const ref = resolveIface(ctx.device, a.if as string, true);
   if (!ref || ref === 'ambiguous') return err(ctx, '% Invalid interface');
+  if (ref.kind === 'po') {
+    const members = ctx.device.ports.filter((p) => p.channelGroup === ref.number).map((p) => p.name);
+    if (!members.length) return err(ctx, `% Port-channel${ref.number} nie ma jeszcze portów. Dodaj je na interfejsach poleceniem channel-group ${ref.number} mode active.`);
+    ctx.session.ifaces = members;
+    ctx.session.mode = 'if';
+    return;
+  }
   if (!ref.exists) {
     if (ref.kind === 'sub') ctx.device.vifs.push(blankVif('sub', ref.name, ref.parent, 0));
     if (ref.kind === 'svi') {
@@ -737,6 +753,7 @@ def(IF_MODES, 'shutdown', (ctx) => {
   for (const target of targetsL3(ctx)) {
     if (!target.shutdown) ctx.out.push(`%LINK-5-CHANGED: Interface ${target.name}, changed state to administratively down`);
     target.shutdown = true;
+    if ('errDisabled' in target) target.errDisabled = false;
   }
   mark(ctx);
 });
@@ -828,6 +845,153 @@ def(['if', 'if-range'], 'switchport', (ctx) => {
   }
   mark(ctx);
 }, ['l3switch']);
+function parseMac(text: string): string | null {
+  const hex = text.toLowerCase().replace(/[.:-]/g, '');
+  return /^[0-9a-f]{12}$/.test(hex) ? hex : null;
+}
+
+function forSecurePorts(ctx: Ctx, apply: (port: Port) => void): void {
+  for (const port of targetPorts(ctx)) {
+    if (!port.switchport) {
+      err(ctx, `% ${port.name} is not a switchport. Use "switchport" first.`);
+      continue;
+    }
+    if (port.mode !== 'access') {
+      err(ctx, `Command rejected: ${port.name} is a trunk port.`);
+      continue;
+    }
+    apply(port);
+  }
+  mark(ctx);
+}
+
+def(['if', 'if-range'], 'switchport port-security', (ctx) => forSecurePorts(ctx, (p) => (p.portSecurity.enabled = true)), [...SWITCHES]);
+def(['if', 'if-range'], 'no switchport port-security', (ctx) => forSwitchports(ctx, (p) => (p.portSecurity.enabled = false)), [...SWITCHES]);
+def(['if', 'if-range'], 'switchport port-security maximum <num:n:1-64>', (ctx, a) => forSecurePorts(ctx, (p) => (p.portSecurity.maximum = a.n as number)), [...SWITCHES]);
+def(['if', 'if-range'], 'no switchport port-security maximum', (ctx) => forSwitchports(ctx, (p) => (p.portSecurity.maximum = 1)), [...SWITCHES]);
+for (const mode of ['shutdown', 'restrict', 'protect'] as ViolationMode[]) {
+  def(['if', 'if-range'], `switchport port-security violation ${mode}`, (ctx) => forSecurePorts(ctx, (p) => (p.portSecurity.violation = mode)), [...SWITCHES]);
+}
+def(['if', 'if-range'], 'no switchport port-security violation', (ctx) => forSwitchports(ctx, (p) => (p.portSecurity.violation = 'shutdown')), [...SWITCHES]);
+def(['if', 'if-range'], 'switchport port-security mac-address sticky', (ctx) => forSecurePorts(ctx, (p) => (p.portSecurity.sticky = true)), [...SWITCHES]);
+def(['if', 'if-range'], 'no switchport port-security mac-address sticky', (ctx) => {
+  forSwitchports(ctx, (p) => {
+    p.portSecurity.sticky = false;
+    p.portSecurity.stickyMacs = [];
+  });
+}, [...SWITCHES]);
+def(['if', 'if-range'], 'switchport port-security mac-address sticky <word:mac>', (ctx, a) => {
+  const mac = parseMac(a.mac as string);
+  if (!mac) return err(ctx, '% Invalid MAC address. Use the format xxxx.xxxx.xxxx');
+  forSecurePorts(ctx, (p) => {
+    if (!p.portSecurity.stickyMacs.includes(mac)) p.portSecurity.stickyMacs.push(mac);
+  });
+}, [...SWITCHES]);
+def(['if', 'if-range'], 'switchport port-security mac-address <word:mac>', (ctx, a) => {
+  const mac = parseMac(a.mac as string);
+  if (!mac) return err(ctx, '% Invalid MAC address. Use the format xxxx.xxxx.xxxx');
+  forSecurePorts(ctx, (p) => {
+    if (!p.portSecurity.macs.includes(mac)) p.portSecurity.macs.push(mac);
+  });
+}, [...SWITCHES]);
+def(['if', 'if-range'], 'no switchport port-security mac-address <word:mac>', (ctx, a) => {
+  const mac = parseMac(a.mac as string);
+  forSwitchports(ctx, (p) => {
+    p.portSecurity.macs = p.portSecurity.macs.filter((m) => m !== mac);
+    p.portSecurity.stickyMacs = p.portSecurity.stickyMacs.filter((m) => m !== mac);
+  });
+}, [...SWITCHES]);
+def(['priv'], 'clear port-security sticky', (ctx) => {
+  for (const port of ctx.device.ports) port.portSecurity.stickyMacs = [];
+  mark(ctx);
+}, [...SWITCHES]);
+
+def(['config'], 'ip dhcp snooping', (ctx) => {
+  ctx.device.dhcpSnooping.enabled = true;
+  mark(ctx);
+}, [...SWITCHES]);
+def(['config'], 'no ip dhcp snooping', (ctx) => {
+  ctx.device.dhcpSnooping.enabled = false;
+  mark(ctx);
+}, [...SWITCHES]);
+def(['config'], 'ip dhcp snooping vlan <vlans:v>', (ctx, a) => {
+  const ids = parseVlanIds(a.v as string);
+  if (!ids) return err(ctx, '% Invalid VLAN list');
+  ctx.device.dhcpSnooping.vlans = [...new Set([...ctx.device.dhcpSnooping.vlans, ...ids])].sort((x, y) => x - y);
+  mark(ctx);
+}, [...SWITCHES]);
+def(['config'], 'no ip dhcp snooping vlan <vlans:v>', (ctx, a) => {
+  const ids = parseVlanIds(a.v as string) ?? [];
+  ctx.device.dhcpSnooping.vlans = ctx.device.dhcpSnooping.vlans.filter((v) => !ids.includes(v));
+  mark(ctx);
+}, [...SWITCHES]);
+def(['config'], 'ip dhcp snooping information option', () => {}, [...SWITCHES]);
+def(['config'], 'no ip dhcp snooping information option', () => {}, [...SWITCHES]);
+def(['if', 'if-range'], 'ip dhcp snooping trust', (ctx) => forSwitchports(ctx, (p) => (p.dhcpTrust = true)), [...SWITCHES]);
+def(['if', 'if-range'], 'no ip dhcp snooping trust', (ctx) => forSwitchports(ctx, (p) => (p.dhcpTrust = false)), [...SWITCHES]);
+def(['if', 'if-range'], 'ip dhcp snooping limit rate <num:r:1-2048>', () => {}, [...SWITCHES]);
+
+for (const mode of ['active', 'passive', 'on'] as ChannelMode[]) {
+  def(['if', 'if-range'], `channel-group <num:g:1-64> mode ${mode}`, (ctx, a) => {
+    const group = a.g as number;
+    const others = ctx.device.ports.filter((p) => p.channelGroup === group && !ctx.session.ifaces.includes(p.name));
+    if (others.some((p) => (p.channelMode === 'on') !== (mode === 'on'))) {
+      return err(ctx, `% Command rejected (Channel protocol mismatch for interface ${ctx.session.ifaces[0]} in group ${group})`);
+    }
+    if (!ctx.device.ports.some((p) => p.channelGroup === group)) ctx.out.push(`Creating a port-channel interface Port-channel ${group}`);
+    forSwitchports(ctx, (p) => {
+      p.channelGroup = group;
+      p.channelMode = mode;
+    });
+  }, [...SWITCHES]);
+}
+def(['if', 'if-range'], 'no channel-group', (ctx) => forSwitchports(ctx, (p) => {
+  p.channelGroup = 0;
+  p.channelMode = '';
+}), [...SWITCHES]);
+
+function fhrpGroup(ctx: Ctx, target: Port | VirtualIf, proto: FhrpProto, group: number): FhrpGroup {
+  if (target.fhrp && target.fhrp.proto === proto && target.fhrp.group === group) return target.fhrp;
+  if (target.fhrp) ctx.out.push(`% Ten symulator obsługuje jedną grupę ${target.fhrp.proto.toUpperCase()}/HSRP na interfejsie. Poprzednia grupa ${target.fhrp.group} została zastąpiona.`);
+  target.fhrp = { proto, group, ip: '', priority: 100, preempt: proto === 'vrrp' };
+  return target.fhrp;
+}
+
+function forFhrp(ctx: Ctx, proto: FhrpProto, group: number, apply: (fhrp: FhrpGroup, target: Port | VirtualIf) => void): void {
+  for (const target of targetsL3(ctx)) {
+    if ('switchport' in target && target.switchport) {
+      err(ctx, `% ${proto === 'vrrp' ? 'VRRP' : 'HSRP'} wymaga interfejsu warstwy 3 z adresem IP.`);
+      continue;
+    }
+    apply(fhrpGroup(ctx, target, proto, group), target);
+  }
+  mark(ctx);
+}
+
+for (const [proto, word, range] of [['vrrp', 'vrrp', '1-255'], ['hsrp', 'standby', '0-255']] as const) {
+  def(IF_MODES, `${word} <num:g:${range}> ip <ip:vip>`, (ctx, a) => {
+    const vip = parseIp(a.vip as string)!;
+    forFhrp(ctx, proto, a.g as number, (fhrp, target) => {
+      const own = parseIp(target.ip);
+      if (own !== null && networkOf(own, target.prefix) !== networkOf(vip, target.prefix)) {
+        err(ctx, `% Address ${a.vip as string} in group ${a.g as number} is not in the subnet of ${target.name}`);
+        return;
+      }
+      fhrp.ip = a.vip as string;
+    });
+  }, [...ROUTERS]);
+  def(IF_MODES, `${word} <num:g:${range}> priority <num:p:${proto === 'vrrp' ? '1-254' : '0-255'}>`, (ctx, a) => {
+    forFhrp(ctx, proto, a.g as number, (fhrp) => (fhrp.priority = a.p as number));
+  }, [...ROUTERS]);
+  def(IF_MODES, `${word} <num:g:${range}> preempt`, (ctx, a) => forFhrp(ctx, proto, a.g as number, (fhrp) => (fhrp.preempt = true)), [...ROUTERS]);
+  def(IF_MODES, `no ${word} <num:g:${range}> preempt`, (ctx, a) => forFhrp(ctx, proto, a.g as number, (fhrp) => (fhrp.preempt = false)), [...ROUTERS]);
+  def(IF_MODES, `no ${word} <num:g:${range}>`, (ctx, a) => {
+    for (const target of targetsL3(ctx)) if (target.fhrp?.proto === proto && target.fhrp.group === a.g) target.fhrp = null;
+    mark(ctx);
+  }, [...ROUTERS]);
+}
+def(IF_MODES, 'standby version <num:v:1-2>', () => {}, [...ROUTERS]);
+
 def(['subif'], 'encapsulation dot1q <num:v:1-4094>', (ctx, a) => {
   const vif = ctx.device.vifs.find((v) => v.name === ctx.session.ifaces[0]);
   if (!vif) return;
@@ -1227,6 +1391,28 @@ const HELP: Record<string, L10n> = {
   'dns-server': l('Serwer DNS dla klientów', 'DNS servers'),
   lease: l('Czas dzierżawy', 'Address lease time'),
   repeat: l('Liczba pakietów', 'Specify repeat count'),
+  'port-security': l('Ochrona portu limitem adresów MAC', 'Secure the port with a MAC address limit'),
+  maximum: l('Największa liczba adresów MAC', 'Max secure addresses'),
+  violation: l('Reakcja na naruszenie', 'Security violation mode'),
+  protect: l('Odrzucaj po cichu', 'Security violation protect mode'),
+  restrict: l('Odrzucaj i licz naruszenia', 'Security violation restrict mode'),
+  'mac-address': l('Bezpieczny adres MAC', 'Secure mac address'),
+  sticky: l('Zapamiętuj adresy w konfiguracji', 'Configure dynamic secure addresses as sticky'),
+  snooping: l('Ochrona przed fałszywym serwerem DHCP', 'DHCP Snooping'),
+  trust: l('Port zaufany (za nim jest prawdziwy serwer)', 'DHCP Snooping trust config'),
+  information: l('Opcja 82 (informacje o porcie)', 'DHCP Snooping information'),
+  option: l('Opcja DHCP', 'DHCP Snooping information option'),
+  limit: l('Ograniczenie', 'DHCP Snooping limit'),
+  rate: l('Liczba pakietów na sekundę', 'DHCP Snooping rate limit'),
+  'channel-group': l('Dodanie portu do kanału EtherChannel', 'Etherchannel/port bundling configuration'),
+  active: l('LACP aktywnie negocjuje kanał', 'Enable LACP unconditionally'),
+  passive: l('LACP czeka na negocjację drugiej strony', 'Enable LACP only if a LACP device is detected'),
+  on: l('Kanał bez negocjacji', 'Enable Etherchannel only'),
+  etherchannel: l('Kanały EtherChannel', 'EtherChannel information'),
+  summary: l('Podsumowanie', 'One-line summary per channel-group'),
+  vrrp: l('Zapasowa brama VRRP', 'VRRP Interface configuration commands'),
+  standby: l('Zapasowa brama HSRP', 'HSRP interface configuration commands'),
+  preempt: l('Przejmowanie roli przez wyższy priorytet', 'Overthrow lower priority designated routers'),
   length: l('Liczba wierszy ekranu', 'Set number of lines on a screen'),
   '<cr>': l('Wykonaj', 'Execute'),
 };

@@ -89,7 +89,7 @@ function QuestionView({ item, answer, onAnswer, revealed }: { item: Prepared; an
                   }
                 }}
               >
-                <span class="key">{String.fromCharCode(65 + position)}</span>
+                <kbd class="key">{String.fromCharCode(65 + position)}</kbd>
                 <span>{tr(q.options[optionIndex])}</span>
                 {revealed && isRight && <CircleCheck aria-label={tx('poprawna', 'correct')} />}
                 {revealed && !isRight && selected && <CircleX aria-label={tx('błędna', 'wrong')} />}
@@ -194,6 +194,7 @@ export function Quiz({ questions, seed, mode, pass = 70, timeLimit, onFinish, re
   const [left, setLeft] = useState(timeLimit ?? 0);
   const item = items[index];
   const latest = useRef(answers);
+  const quizRef = useRef<HTMLDivElement>(null);
   latest.current = answers;
 
   const finish = () => {
@@ -208,6 +209,22 @@ export function Quiz({ questions, seed, mode, pass = 70, timeLimit, onFinish, re
     setResult(res);
     onFinish(res);
   };
+
+  useEffect(() => {
+    if (result) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
+      if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable]')) return;
+      const position = event.key.toUpperCase().charCodeAt(0) - 65;
+      const option = quizRef.current?.querySelectorAll<HTMLButtonElement>('.options .option')[position];
+      if (!option || option.disabled) return;
+      event.preventDefault();
+      option.click();
+      option.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [result]);
 
   useEffect(() => {
     if (!timeLimit || result) return;
@@ -269,9 +286,15 @@ export function Quiz({ questions, seed, mode, pass = 70, timeLimit, onFinish, re
   const last = index === items.length - 1;
   const answered = hasAnswer(item.question, answer);
   const correct = isRevealed && isCorrect(item.question, item.question.kind === 'order' && answer === undefined ? item.optionOrder : answer);
+  const instant = mode === 'practice' && item.question.kind === 'single';
+  const reveal = () => setRevealed((list) => Object.assign([...list], { [index]: true }));
+  const onAnswer = (value: Answer) => {
+    setAnswer(value);
+    if (instant) reveal();
+  };
 
   return (
-    <div class="quiz">
+    <div class="quiz" ref={quizRef}>
       <div class="quiz-top">
         <span class="badge">
           {index + 1} / {items.length}
@@ -294,10 +317,12 @@ export function Quiz({ questions, seed, mode, pass = 70, timeLimit, onFinish, re
               ? tx('Wpisz odpowiedź', 'Type the answer')
               : item.question.kind === 'order'
                 ? tx('Ułóż we właściwej kolejności', 'Put in the right order')
-                : tx('Jedna poprawna odpowiedź', 'One correct answer')}
+                : instant
+                  ? tx('Kliknij poprawną odpowiedź', 'Click the correct answer')
+                  : tx('Jedna poprawna odpowiedź', 'One correct answer')}
         </span>
         <h3>{tr(item.question.q)}</h3>
-        <QuestionView item={item} answer={answer} onAnswer={setAnswer} revealed={Boolean(isRevealed)} />
+        <QuestionView item={item} answer={answer} onAnswer={onAnswer} revealed={Boolean(isRevealed)} />
         {isRevealed && (
           <div class={`callout ${correct ? 'callout-ok' : 'callout-warn'} feedback`} style={{ marginTop: 'var(--space-5)' }} role="status">
             {correct ? <CircleCheck aria-hidden="true" /> : <Lightbulb aria-hidden="true" />}
@@ -315,8 +340,8 @@ export function Quiz({ questions, seed, mode, pass = 70, timeLimit, onFinish, re
           </button>
         )}
         <div class="spacer" />
-        {mode === 'practice' && !isRevealed && (
-          <button type="button" class="btn btn-primary" disabled={!answered} onClick={() => setRevealed((list) => Object.assign([...list], { [index]: true }))}>
+        {mode === 'practice' && !isRevealed && !instant && (
+          <button type="button" class="btn btn-primary" disabled={!answered} onClick={reveal}>
             {tx('Sprawdź', 'Check')}
           </button>
         )}

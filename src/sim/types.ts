@@ -18,6 +18,16 @@ export type PortMedia = 'copper' | 'fiber' | 'wireless';
 export type CableType = 'copper' | 'fiber';
 export type NatRole = '' | 'inside' | 'outside';
 
+export type FhrpProto = 'vrrp' | 'hsrp';
+
+export interface FhrpGroup {
+  proto: FhrpProto;
+  group: number;
+  ip: string;
+  priority: number;
+  preempt: boolean;
+}
+
 export interface L3Config {
   ip: string;
   prefix: number;
@@ -26,6 +36,19 @@ export interface L3Config {
   aclIn: string;
   aclOut: string;
   ospfCost: number;
+  fhrp: FhrpGroup | null;
+}
+
+export type ViolationMode = 'shutdown' | 'restrict' | 'protect';
+export type ChannelMode = '' | 'active' | 'passive' | 'on';
+
+export interface PortSecurity {
+  enabled: boolean;
+  maximum: number;
+  violation: ViolationMode;
+  sticky: boolean;
+  macs: string[];
+  stickyMacs: string[];
 }
 
 export interface Port extends L3Config {
@@ -46,6 +69,11 @@ export interface Port extends L3Config {
   gateway: string;
   dns: string;
   zone: string;
+  portSecurity: PortSecurity;
+  errDisabled: boolean;
+  dhcpTrust: boolean;
+  channelGroup: number;
+  channelMode: ChannelMode;
 }
 
 export interface VirtualIf extends L3Config {
@@ -184,6 +212,7 @@ export interface Device {
   wifiClient: WifiClientConfig | null;
   fwRules: FwRule[];
   stpPriority: number;
+  dhcpSnooping: { enabled: boolean; vlans: number[] };
   banner: string;
   mgmt: MgmtConfig;
   startup: string;

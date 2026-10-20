@@ -1,7 +1,7 @@
 import { modelOf } from './catalog';
 import { inSubnet, networkOf, parseIp, wildcardToPrefix } from './ip';
 import { blankPort, findDevice, isHost } from './network';
-import type { Device, Link, LinkEnd, NatRole, Network, Port, VirtualIf } from './types';
+import type { Device, FhrpProto, Link, LinkEnd, NatRole, Network, Port, VirtualIf } from './types';
 
 export type L3Attach =
   | { kind: 'port'; port: string }
@@ -66,7 +66,40 @@ export interface WifiAssoc {
 
 export type WifiStatus = 'connected' | 'no-ssid' | 'bad-key' | 'out-of-range' | 'off';
 
+export type MemberState = 'primary' | 'bundled' | 'individual' | 'suspended' | 'down';
+
+export interface ChannelInfo {
+  group: number;
+  lacp: boolean;
+  members: { port: Port; state: MemberState }[];
+}
+
+export interface FhrpState {
+  proto: FhrpProto;
+  group: number;
+  vip: number;
+  vmac: string;
+  priority: number;
+  preempt: boolean;
+  active: boolean;
+  activeIp: number;
+  standbyIp: number | null;
+}
+
 export const RADIO_PREFIX = 'Radio:';
+
+export function adminDown(port: Port): boolean {
+  return port.shutdown || port.errDisabled;
+}
+
+export function virtualMac(proto: FhrpProto, group: number): string {
+  const suffix = group.toString(16).padStart(2, '0');
+  return proto === 'vrrp' ? `00005e0001${suffix}` : `00000c07ac${suffix}`;
+}
+
+function sameL2(a: Port, b: Port): boolean {
+  return a.mode === b.mode && a.accessVlan === b.accessVlan && a.nativeVlan === b.nativeVlan && (a.mode === 'access' || a.allowedVlans === b.allowedVlans);
+}
 
 function bridgeId(device: Device): string {
   return `${device.stpPriority.toString().padStart(5, '0')}.${device.baseMac}`;
@@ -75,7 +108,7 @@ function bridgeId(device: Device): string {
 function stpCost(speed: number): number {
   if (speed >= 25000) return 1;
   if (speed >= 10000) return 2;
-  if (speed >= 2500) return 3;
+  if (speed >= 2000) return 3;
   if (speed >= 1000) return 4;
   return 19;
 }
@@ -114,6 +147,8 @@ export class Topology {
   private routeCache = new Map<string, Route[]>();
   private stpCache: Map<string, StpBridgeInfo> | null = null;
   private ospfCache: { routes: Map<string, Route[]>; neighbors: Map<string, OspfNeighbor[]> } | null = null;
+  private channelCache: Map<string, MemberState> | null = null;
+  private fhrpCache: Map<string, FhrpState> | null = null;
 
   constructor(net: Network) {
     this.net = net;
@@ -224,7 +259,7 @@ export class Topology {
         const end = link.a.dev === device.id ? link.b : link.a;
         const peerDevice = this.devices.get(end.dev);
         const peerPort = peerDevice?.ports.find((p) => p.name === end.port);
-        powered = Boolean(peerPort?.poe && !peerPort.shutdown);
+        powered = Boolean(peerPort?.poe && !adminDown(peerPort));
       }
     }
     this.poweredCache.set(device.id, powered);
@@ -233,22 +268,115 @@ export class Topology {
 
   portUp(device: Device, name: string): boolean {
     const port = this.port(device, name);
-    if (!port || port.shutdown || !this.isPowered(device)) return false;
+    if (!port || adminDown(port) || !this.isPowered(device)) return false;
     const end = this.peer(device.id, name);
     if (!end) return false;
     const peerDevice = this.devices.get(end.dev);
     if (!peerDevice || !this.isPowered(peerDevice)) return false;
     const peerPort = this.port(peerDevice, end.port);
-    return Boolean(peerPort && !peerPort.shutdown);
+    return Boolean(peerPort && !adminDown(peerPort));
   }
 
-  linkSpeed(device: Device, name: string): number {
+  private physSpeed(device: Device, name: string): number {
     const port = this.port(device, name);
     const end = this.peer(device.id, name);
     if (!port || !end) return port?.speed ?? 0;
     const peerDevice = this.devices.get(end.dev);
     const peerPort = peerDevice && this.port(peerDevice, end.port);
     return Math.min(port.speed, peerPort?.speed ?? port.speed);
+  }
+
+  linkSpeed(device: Device, name: string): number {
+    const port = this.port(device, name);
+    if (port && this.memberState(device.id, name) === 'primary') {
+      return device.ports
+        .filter((p) => p.channelGroup === port.channelGroup && ['primary', 'bundled'].includes(this.memberState(device.id, p.name) ?? ''))
+        .reduce((sum, p) => sum + this.physSpeed(device, p.name), 0);
+    }
+    return this.physSpeed(device, name);
+  }
+
+  memberState(dev: string, port: string): MemberState | null {
+    return this.channelStates().get(`${dev}|${port}`) ?? null;
+  }
+
+  memberInactive(dev: string, port: string): boolean {
+    const state = this.memberState(dev, port);
+    return state === 'bundled' || state === 'suspended';
+  }
+
+  portLabel(device: Device, name: string): string {
+    const port = this.port(device, name);
+    if (!port) return name;
+    const state = this.memberState(device.id, name);
+    return state === 'primary' || state === 'bundled' ? `Po${port.channelGroup}` : port.short;
+  }
+
+  channels(device: Device): ChannelInfo[] {
+    const groups = [...new Set(device.ports.filter((p) => p.switchport && p.channelGroup > 0).map((p) => p.channelGroup))].sort((a, b) => a - b);
+    return groups.map((group) => {
+      const members = device.ports.filter((p) => p.switchport && p.channelGroup === group);
+      return {
+        group,
+        lacp: members.some((p) => p.channelMode !== 'on'),
+        members: members.map((port) => ({ port, state: this.memberState(device.id, port.name) ?? 'down' })),
+      };
+    });
+  }
+
+  private channelPeer(device: Device, port: Port): { dev: Device; port: Port } | null {
+    const end = this.peer(device.id, port.name);
+    const peerDev = end ? this.devices.get(end.dev) : undefined;
+    const peerPort = peerDev && end ? this.port(peerDev, end.port) : undefined;
+    return peerDev && peerPort ? { dev: peerDev, port: peerPort } : null;
+  }
+
+  private groupReference(device: Device, group: number): Port | undefined {
+    return device.ports.find((p) => p.switchport && p.channelGroup === group);
+  }
+
+  private groupPartner(device: Device, group: number): string | null {
+    for (const port of device.ports) {
+      if (!port.switchport || port.channelGroup !== group || !this.portUp(device, port.name)) continue;
+      const peer = this.channelPeer(device, port);
+      if (peer && peer.port.switchport && peer.port.channelGroup > 0) return `${peer.dev.id}|${peer.port.channelGroup}`;
+    }
+    return null;
+  }
+
+  private pairState(device: Device, port: Port): MemberState {
+    const peer = this.channelPeer(device, port);
+    if (!peer || !peer.port.switchport || peer.port.channelGroup <= 0) return port.channelMode === 'on' ? 'suspended' : 'individual';
+    const mine = port.channelMode;
+    const theirs = peer.port.channelMode;
+    if ((mine === 'on') !== (theirs === 'on')) return 'suspended';
+    if (mine === 'passive' && theirs === 'passive') return 'individual';
+    if (this.groupPartner(device, port.channelGroup) !== `${peer.dev.id}|${peer.port.channelGroup}`) return 'suspended';
+    if (this.groupPartner(peer.dev, peer.port.channelGroup) !== `${device.id}|${port.channelGroup}`) return 'suspended';
+    const myRef = this.groupReference(device, port.channelGroup);
+    const peerRef = this.groupReference(peer.dev, peer.port.channelGroup);
+    if (!myRef || !peerRef || !sameL2(myRef, port) || !sameL2(peerRef, peer.port)) return 'suspended';
+    return 'bundled';
+  }
+
+  private channelStates(): Map<string, MemberState> {
+    if (this.channelCache) return this.channelCache;
+    const states = new Map<string, MemberState>();
+    this.channelCache = states;
+    for (const device of this.net.devices) {
+      const groups = new Map<number, Port[]>();
+      for (const port of device.ports) {
+        if (!port.switchport || port.channelGroup <= 0) continue;
+        const state = this.portUp(device, port.name) ? this.pairState(device, port) : 'down';
+        states.set(`${device.id}|${port.name}`, state);
+        if (state === 'bundled') groups.set(port.channelGroup, [...(groups.get(port.channelGroup) ?? []), port]);
+      }
+      for (const members of groups.values()) {
+        const primary = [...members].sort((a, b) => (this.link(device.id, a.name)?.id ?? '').localeCompare(this.link(device.id, b.name)?.id ?? ''))[0];
+        states.set(`${device.id}|${primary.name}`, 'primary');
+      }
+    }
+    return states;
   }
 
   vlanExists(device: Device, vlan: number): boolean {
@@ -268,6 +396,7 @@ export class Topology {
         port.switchport &&
         this.portCarriesVlan(port, vlan) &&
         this.portUp(device, port.name) &&
+        !this.memberInactive(device.id, port.name) &&
         !this.stpBlocked(device.id, port.name),
     );
   }
@@ -347,7 +476,56 @@ export class Topology {
   }
 
   ownsIp(device: Device, ip: number): L3If | undefined {
-    return this.l3Ifs(device).find((entry) => entry.ip === ip && entry.up);
+    const ifs = this.l3Ifs(device);
+    return ifs.find((entry) => entry.ip === ip && entry.up) ?? ifs.find((entry) => this.virtualFor(device, entry)?.ip === ip);
+  }
+
+  fhrpOf(device: Device, entry: L3If): FhrpState | undefined {
+    return this.fhrpStates().get(`${device.id}|${entry.name}`);
+  }
+
+  virtualFor(device: Device, entry: L3If): { ip: number; mac: string } | null {
+    const state = this.fhrpOf(device, entry);
+    return state?.active ? { ip: state.vip, mac: state.vmac } : null;
+  }
+
+  private fhrpStates(): Map<string, FhrpState> {
+    if (this.fhrpCache) return this.fhrpCache;
+    const states = new Map<string, FhrpState>();
+    this.fhrpCache = states;
+    const candidates: { device: Device; entry: L3If; vip: number; priority: number }[] = [];
+    for (const device of this.net.devices) {
+      if ((device.kind !== 'router' && device.kind !== 'l3switch') || !this.isPowered(device)) continue;
+      for (const entry of this.l3Ifs(device)) {
+        const group = entry.cfg.fhrp;
+        if (!group || !entry.up || entry.ip === null || entry.attach.kind === 'loop') continue;
+        const vip = parseIp(group.ip);
+        if (vip === null || !inSubnet(vip, entry.ip, entry.prefix)) continue;
+        candidates.push({ device, entry, vip, priority: vip === entry.ip ? 255 : group.priority });
+      }
+    }
+    for (const candidate of candidates) {
+      const group = candidate.entry.cfg.fhrp!;
+      const reach = this.l2Reach(candidate.device, candidate.entry);
+      const members = candidates.filter((other) => {
+        const otherGroup = other.entry.cfg.fhrp!;
+        if (otherGroup.proto !== group.proto || otherGroup.group !== group.group || other.vip !== candidate.vip) return false;
+        return other === candidate || reach.has(`${other.device.id}|${other.entry.name}`);
+      });
+      members.sort((a, b) => b.priority - a.priority || b.entry.ip! - a.entry.ip!);
+      states.set(`${candidate.device.id}|${candidate.entry.name}`, {
+        proto: group.proto,
+        group: group.group,
+        vip: candidate.vip,
+        vmac: virtualMac(group.proto, group.group),
+        priority: candidate.priority,
+        preempt: group.preempt,
+        active: members[0] === candidate,
+        activeIp: members[0].entry.ip!,
+        standbyIp: members.find((m) => m !== members[0])?.entry.ip ?? null,
+      });
+    }
+    return states;
   }
 
   routes(device: Device): Route[] {
@@ -484,12 +662,12 @@ export class Topology {
     const bridges = this.net.devices.filter((d) => this.isBridge(d) && this.isPowered(d));
     const result = new Map<string, StpBridgeInfo>();
     const physUp = (device: Device, port: Port) => {
-      if (port.shutdown) return false;
+      if (adminDown(port) || this.memberInactive(device.id, port.name)) return false;
       const end = this.peer(device.id, port.name);
       if (!end) return false;
       const peerDevice = this.devices.get(end.dev);
       const peerPort = peerDevice && this.port(peerDevice, end.port);
-      return Boolean(peerDevice && peerPort && !peerPort.shutdown && this.isPowered(peerDevice));
+      return Boolean(peerDevice && peerPort && !adminDown(peerPort) && this.isPowered(peerDevice));
     };
     const visited = new Set<string>();
     for (const start of bridges) {
@@ -608,7 +786,7 @@ export class Topology {
       const next = this.devices.get(end.dev)!;
       const nextPort = this.port(next, end.port)!;
       if (nextPort.switchport) {
-        if (this.stpBlocked(next.id, nextPort.name)) continue;
+        if (this.stpBlocked(next.id, nextPort.name) || this.memberInactive(next.id, nextPort.name)) continue;
         const ingress = this.ingressVlan(next, nextPort, vlan);
         if (ingress === null) continue;
         for (const out of this.forwardingPorts(next, ingress)) {

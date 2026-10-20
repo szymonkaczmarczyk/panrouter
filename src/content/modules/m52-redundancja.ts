@@ -11,7 +11,7 @@ export const m52: Module = {
     'STP i RSTP, agregacja łączy LACP, zapasowa brama VRRP, projekt hierarchiczny kampusu, spine-leaf w centrum danych i QoS.',
     'STP and RSTP, LACP link aggregation, VRRP gateway redundancy, hierarchical campus design, data center spine-leaf and QoS.',
   ),
-  labs: ['stp'],
+  labs: ['stp', 'etherchannel', 'vrrp'],
   games: ['tablica-mac'],
   sections: [
     {
@@ -56,11 +56,31 @@ export const m52: Module = {
           { t: 'p', text: '**Agregacja łączy** (LACP, 802.3ad) łączy kilka kabli w jeden logiczny kanał. Przepustowość się sumuje, a awaria jednego kabla nie przerywa ruchu. STP widzi kanał jako jedno łącze, więc nic nie blokuje.' },
           { t: 'p', text: 'Brama domyślna to pojedynczy punkt awarii. **VRRP** (otwarty standard, podobnie HSRP) sprawia, że dwa routery lub przełączniki L3 udostępniają jeden wirtualny adres bramy. Gdy aktywny padnie, zapasowy przejmuje adres w około sekundę i komputery niczego nie zauważają.' },
           { t: 'callout', kind: 'tip', text: 'W nowoczesnych kampusach łączy się parę przełączników w jeden logiczny (stacking albo MLAG). Wtedy LACP może iść do dwóch fizycznych urządzeń i STP prawie nie ma czego blokować.' },
+          {
+            t: 'code',
+            lines: ['SW1(config)# interface range g1/0/23-24', 'SW1(config-if-range)# channel-group 1 mode active', 'SW1# show etherchannel summary', '1      Po1(SU)       LACP        Gi1/0/23(P) Gi1/0/24(P)'],
+            caption: 'Tryb active sam proponuje kanał przez LACP. Gdy obie strony mają passive, kanał nie powstanie.',
+          },
+          {
+            t: 'code',
+            lines: ['R1(config)# interface g0/0/0', 'R1(config-if)# vrrp 10 ip 192.168.10.1', 'R1(config-if)# vrrp 10 priority 120', 'R1# show vrrp brief'],
+            caption: 'Komputery dostają bramę 192.168.10.1. Router z wyższym priorytetem jest głównym (Master).',
+          },
         ],
         en: [
           { t: 'p', text: '**Link aggregation** (LACP, 802.3ad) bundles several cables into one logical channel. Bandwidth adds up and losing one cable does not stop traffic. STP sees the channel as one link, so it blocks nothing.' },
           { t: 'p', text: 'The default gateway is a single point of failure. **VRRP** (an open standard, similar to HSRP) lets two routers or L3 switches share one virtual gateway address. When the active one fails, the backup takes over the address in about a second and computers notice nothing.' },
           { t: 'callout', kind: 'tip', text: 'Modern campuses join a pair of switches into one logical switch (stacking or MLAG). Then LACP can span two physical devices and STP has almost nothing to block.' },
+          {
+            t: 'code',
+            lines: ['SW1(config)# interface range g1/0/23-24', 'SW1(config-if-range)# channel-group 1 mode active', 'SW1# show etherchannel summary', '1      Po1(SU)       LACP        Gi1/0/23(P) Gi1/0/24(P)'],
+            caption: 'Mode active proposes the channel through LACP. When both sides use passive, no channel forms.',
+          },
+          {
+            t: 'code',
+            lines: ['R1(config)# interface g0/0/0', 'R1(config-if)# vrrp 10 ip 192.168.10.1', 'R1(config-if)# vrrp 10 priority 120', 'R1# show vrrp brief'],
+            caption: 'Computers get gateway 192.168.10.1. The router with the higher priority is the main one (Master).',
+          },
         ],
       },
     },
@@ -108,5 +128,7 @@ export const m52: Module = {
     { id: 'q52-6', kind: 'order', q: l('Ułóż warstwy kampusu od użytkownika w górę.', 'Order the campus layers from the user upward.'), items: [l('Dostęp', 'Access'), l('Dystrybucja', 'Distribution'), l('Rdzeń', 'Core')], explain: l('Użytkownik podłącza się do dostępu, ten do dystrybucji, a ta do rdzenia.', 'Users plug into access, access into distribution, distribution into core.') },
     { id: 'q52-7', kind: 'single', q: l('Jaka architektura dominuje w centrach danych?', 'Which architecture dominates data centers?'), options: [l('Spine-leaf', 'Spine-leaf'), l('Pierścień tokenowy', 'Token ring'), l('Magistrala', 'Bus'), l('Gwiazda z koncentratorem', 'Star with a hub')], answer: 0, explain: l('Spine-leaf daje przewidywalne opóźnienie i równoległe ścieżki.', 'Spine-leaf gives predictable latency and parallel paths.') },
     { id: 'q52-8', kind: 'input', q: l('Jaką wartość DSCP ma ruch głosowy EF?', 'Which DSCP value does EF voice traffic use?'), answer: ['46'], explain: l('EF (Expedited Forwarding) to DSCP 46.', 'EF (Expedited Forwarding) is DSCP 46.') },
+    { id: 'q52-9', kind: 'single', q: l('Co oznacza Po1(SU) w wyniku show etherchannel summary?', 'What does Po1(SU) mean in show etherchannel summary?'), options: [l('Kanał warstwy 2 działa i jest w użyciu', 'A layer 2 channel that is up and in use'), l('Kanał jest zawieszony', 'The channel is suspended'), l('Kanał czeka na decyzję STP', 'The channel waits for STP'), l('Kanał używa VRRP', 'The channel uses VRRP')], answer: 0, explain: l('S oznacza warstwę 2, a U kanał w użyciu. Porty z literą P są w kanale.', 'S means layer 2 and U means in use. Ports marked P are bundled.') },
+    { id: 'q52-10', kind: 'single', q: l('Oba końce łącza mają channel-group 1 mode passive. Co się stanie?', 'Both ends of a link use channel-group 1 mode passive. What happens?'), options: [l('Kanał nie powstanie, bo żadna strona nie zaczyna negocjacji', 'No channel forms because neither side starts negotiation'), l('Kanał powstanie normalnie', 'The channel forms normally'), l('Porty przejdą w stan err-disabled', 'The ports go err-disabled'), l('STP wyłączy oba łącza', 'STP shuts both links')], answer: 0, explain: l('Passive tylko odpowiada na LACP. Co najmniej jedna strona musi mieć active.', 'Passive only answers LACP. At least one side must be active.') },
   ],
 };

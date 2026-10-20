@@ -996,6 +996,9 @@
   background: var(--surface);
   box-shadow: var(--shadow-3);
   z-index: 30;
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .menu button {
@@ -1117,6 +1120,7 @@
     left: var(--space-2);
     right: var(--space-2);
     width: auto;
+    max-height: calc(100dvh - var(--topbar-h) - env(safe-area-inset-top) - 110px - var(--bottomnav-h) - env(safe-area-inset-bottom) - var(--space-4));
   }
 
   .palette-item {

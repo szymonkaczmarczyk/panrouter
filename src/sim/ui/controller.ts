@@ -89,6 +89,10 @@ export class SimController {
 
   bump(): void {
     this.rev.value++;
+    if (this.sim.dirty) {
+      this.sim.dirty = false;
+      this.persist(this.net);
+    }
   }
 
   changed(structural = true): void {

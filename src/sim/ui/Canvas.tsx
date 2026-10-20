@@ -296,7 +296,7 @@ export function Canvas({ ctrl, view, onView, readOnlyDevices }: { ctrl: SimContr
 
   const ledColor = (dev: Device, port: string) => {
     if (!topo.portUp(dev, port)) return 'var(--danger)';
-    if (topo.stpBlocked(dev.id, port)) return 'var(--warn)';
+    if (topo.stpBlocked(dev.id, port) || topo.memberState(dev.id, port) === 'suspended') return 'var(--warn)';
     return 'var(--ok)';
   };
 

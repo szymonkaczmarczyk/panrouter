@@ -65,18 +65,33 @@ export function PhysicalTab({ ctrl, device }: { ctrl: SimController; device: Dev
           <tbody>
             {device.ports.map((port) => {
               const up = topo.portUp(device, port.name);
-              const blocked = topo.stpBlocked(device.id, port.name);
+              const member = topo.memberState(device.id, port.name);
+              const blocked = topo.stpBlocked(device.id, port.name) || member === 'suspended';
               const end = topo.peer(device.id, port.name);
               const peer = end ? topo.device(end.dev) : undefined;
               const peerPort = peer && end ? topo.port(peer, end.port) : undefined;
-              const status = port.shutdown ? tx('wyłączony', 'admin down') : !end ? tx('wolny', 'free') : blocked ? tx('zablokowany (STP)', 'blocked (STP)') : up ? tx('aktywny', 'up') : tx('nieaktywny', 'down');
-              const color = !end || port.shutdown || !up ? 'var(--danger)' : blocked ? 'var(--warn)' : 'var(--ok)';
+              const status = port.shutdown
+                ? tx('wyłączony', 'admin down')
+                : port.errDisabled
+                  ? tx('err-disabled (port security)', 'err-disabled (port security)')
+                  : !end
+                    ? tx('wolny', 'free')
+                    : member === 'suspended'
+                      ? tx(`zawieszony w Po${port.channelGroup}`, `suspended in Po${port.channelGroup}`)
+                      : blocked
+                        ? tx('zablokowany (STP)', 'blocked (STP)')
+                        : up && (member === 'primary' || member === 'bundled')
+                          ? tx(`aktywny w Po${port.channelGroup}`, `up in Po${port.channelGroup}`)
+                          : up
+                            ? tx('aktywny', 'up')
+                            : tx('nieaktywny', 'down');
+              const color = !end || port.shutdown || port.errDisabled || !up ? 'var(--danger)' : blocked ? 'var(--warn)' : 'var(--ok)';
               return (
                 <tr key={port.name}>
                   <td class="mono">{port.short}</td>
                   <td>
                     <span class="row" style={{ gap: 'var(--space-2)' }}>
-                      <span class="dot" style={{ background: end || port.shutdown ? color : 'var(--surface-3)' }} />
+                      <span class="dot" style={{ background: end || port.shutdown || port.errDisabled ? color : 'var(--surface-3)' }} />
                       {status}
                     </span>
                   </td>

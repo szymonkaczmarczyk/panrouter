@@ -144,6 +144,27 @@ const SOLUTIONS: Record<string, (sim: Simulator) => void> = {
   },
 };
 
+SOLUTIONS.etherchannel = (sim) => {
+  for (const sw of ['SW1', 'SW2']) cli(sim, sw, ['interface range g1/0/23-24', 'channel-group 1 mode active', 'exit', 'interface port-channel 1', 'switchport mode trunk']);
+};
+
+SOLUTIONS.vrrp = (sim) => {
+  cli(sim, 'R1', ['interface g0/0/0', 'vrrp 10 ip 192.168.10.1', 'vrrp 10 priority 120']);
+  cli(sim, 'R2', ['interface g0/0/0', 'vrrp 10 ip 192.168.10.1']);
+};
+
+SOLUTIONS['port-security'] = (sim) => {
+  cli(sim, 'SW1', ['interface range g1/0/1-2', 'switchport mode access', 'switchport port-security', 'switchport port-security maximum 1', 'switchport port-security mac-address sticky', 'switchport port-security violation shutdown']);
+};
+
+SOLUTIONS['dhcp-snooping'] = (sim) => {
+  cli(sim, 'SW1', ['ip dhcp snooping', 'ip dhcp snooping vlan 1', 'interface g1/0/24', 'ip dhcp snooping trust']);
+  for (const pc of ['PC1', 'PC2']) {
+    sim.dhcpRelease(dev(sim.net, pc).id);
+    sim.dhcpRenew(dev(sim.net, pc).id);
+  }
+};
+
 SOLUTIONS.egzamin = (sim) => {
   cli(sim, 'SW1', ['vlan 10', 'vlan 20', 'int g1/0/1', 'switchport access vlan 10', 'int g1/0/2', 'switchport access vlan 20', 'int g1/0/24', 'switchport mode trunk']);
   cli(sim, 'R1', [

@@ -98,6 +98,33 @@ const TEXT: Record<string, { pl: string; en: string }> = {
   'port.down': { pl: 'Port {port} jest wyłączony albo druga strona łącza nie działa. Nic nie zostaje wysłane.', en: 'Port {port} is down or the other end is not working. Nothing is sent.' },
   'port.noCable': { pl: 'Do portu {port} nie podłączono kabla.', en: 'No cable is connected to port {port}.' },
   'port.unknown': { pl: 'Nieznany port.', en: 'Unknown port.' },
+  'fhrp.arpReply': {
+    pl: 'Ten router jest aktywną bramą {proto} w grupie {group}. Odpowiada na ARP o wirtualny adres {ip} wirtualnym MAC {mac}.',
+    en: 'This router is the active {proto} gateway in group {group}. It answers ARP for virtual address {ip} with virtual MAC {mac}.',
+  },
+  'lacp.inactive': {
+    pl: 'Port {port} należy do kanału EtherChannel, ale nie przenosi teraz ruchu, więc ramka jest odrzucana.',
+    en: 'Port {port} belongs to an EtherChannel but does not carry traffic right now, so the frame is dropped.',
+  },
+  'psec.learn': { pl: 'Port security: {mac} zostaje zapamiętany jako bezpieczny adres portu {port}.', en: 'Port security: {mac} is remembered as a secure address on port {port}.' },
+  'psec.sticky': {
+    pl: 'Port security (sticky): {mac} trafia do konfiguracji portu {port} i zostanie tam także po restarcie.',
+    en: 'Port security (sticky): {mac} is written into the configuration of port {port} and survives a restart.',
+  },
+  'psec.shutdown': {
+    pl: 'Naruszenie port security: {mac} przekracza limit {max} adresów na {port}. Port przechodzi w stan err-disabled i przestaje działać.',
+    en: 'Port security violation: {mac} exceeds the limit of {max} addresses on {port}. The port goes err-disabled and stops working.',
+  },
+  'psec.restrict': {
+    pl: 'Naruszenie port security na {port}: ramka od {mac} jest odrzucana, a licznik naruszeń rośnie. Port działa dalej.',
+    en: 'Port security violation on {port}: the frame from {mac} is dropped and the violation counter grows. The port keeps working.',
+  },
+  'psec.protect': { pl: 'Port security na {port}: ramka od nieznanego {mac} jest po cichu odrzucana.', en: 'Port security on {port}: the frame from unknown {mac} is silently dropped.' },
+  'snoop.binding': { pl: 'DHCP snooping zapisuje powiązanie: {mac} dostał adres {ip}.', en: 'DHCP snooping records a binding: {mac} received address {ip}.' },
+  'snoop.untrusted': {
+    pl: 'DHCP snooping: {op} przyszedł z niezaufanego portu {port}. Za tym portem nie powinno być serwera DHCP, więc przełącznik odrzuca odpowiedź.',
+    en: 'DHCP snooping: {op} arrived on untrusted port {port}. No DHCP server should be behind this port, so the switch drops the reply.',
+  },
   'stp.blocked': { pl: 'Port {port} jest zablokowany przez STP, żeby nie powstała pętla. Ramka zostaje odrzucona.', en: 'Port {port} is blocked by STP to prevent a loop. The frame is dropped.' },
   'tcp.connected': { pl: 'Połączenie TCP nawiązane (port {port}).', en: 'TCP connection established (port {port}).' },
   'tcp.noSocket': { pl: 'Brak programu czekającego na ten segment TCP.', en: 'No program is waiting for this TCP segment.' },

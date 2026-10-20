@@ -6,9 +6,10 @@ PanRouter to symulator sieci komputerowych w duchu Cisco Packet Tracer połączo
 stawiasz routery, przełączniki, punkty dostępowe Wi-Fi 7, zapory NGFW, serwery i komputery, łączysz je kablem
 miedzianym albo światłowodem i konfigurujesz w CLI lub w panelach. Tryb symulacji zatrzymuje każdy pakiet
 i tłumaczy po polsku, co z nim zrobiło urządzenie: ARP, przełączanie, VLAN-y, routing, NAT, DHCP, DNS i zapora.
+Sieć można wysłać komuś jednym linkiem, zapisać jako obraz PNG, a całą aplikację zainstalować i używać bez internetu.
 
 Wokół symulatora jest ścieżka nauki: 20 modułów na pięciu poziomach (od laika do eksperta), quizy z wyjaśnieniami,
-17 laboratoriów z automatyczną oceną, 10 minigier i egzamin końcowy z częścią praktyczną. Całość działa po polsku,
+21 laboratoriów z automatyczną oceną, 10 minigier i egzamin końcowy z częścią praktyczną. Całość działa po polsku,
 a jednym przyciskiem przełącza się na angielski. Sprzęt i technologie są aktualne na 2026 rok.
 
 ![Pulpit PanRouter z hasłem kursu, przyciskiem startu i ilustracją sieci](docs/screenshots/01-pulpit.png)
@@ -19,7 +20,7 @@ a jednym przyciskiem przełącza się na angielski. Sprzęt i technologie są ak
   zakładają żadnej wiedzy, a każdy nowy termin jest wyjaśniony na przykładzie.
 - **Dla uczniów techników informatycznych i studentów**, którzy przygotowują się do egzaminów zawodowych
   i certyfikacji sieciowych. Laboratoria ćwiczą to samo, co prawdziwe pracownie: adresację, VLAN-y, routing,
-  OSPF, NAT, listy ACL i zabezpieczanie urządzeń.
+  OSPF, NAT, listy ACL, EtherChannel, VRRP, port security, DHCP snooping i zabezpieczanie urządzeń.
 - **Dla nauczycieli**, którzy potrzebują polskojęzycznego symulatora do pokazania ruchu pakietów na lekcji,
   bez instalowania czegokolwiek.
 
@@ -32,11 +33,13 @@ uczy się większość sieciowców.
 ```
 Przeglądarka (Preact + TypeScript, bez backendu)
    │
-   ├── src/sim/          silnik sieci: ramki, ARP, VLAN, STP, routing, OSPF, DHCP, DNS, NAT, ACL, zapora, Wi-Fi
+   ├── src/sim/          silnik sieci: ramki, ARP, VLAN, STP, EtherChannel, port security, DHCP snooping,
+   │                     routing, OSPF, VRRP/HSRP, DHCP, DNS, NAT, ACL, zapora, Wi-Fi
    │     ├── cli/        CLI w stylu IOS i wiersz poleceń komputerów (PL/EN)
    │     └── ui/         plansza SVG, paleta, panele urządzeń, terminal, tryb symulacji
    ├── src/content/      lekcje, diagramy, quizy, laboratoria z oceną, egzamin, słownik
    ├── src/games/        minigry
+   ├── sw.js             service worker generowany przy buildzie: cała aplikacja działa offline
    └── localStorage      postęp, zapisane sieci i ustawienia (nic nie trafia na serwer)
 ```
 
@@ -55,6 +58,7 @@ w śladzie, z którego korzysta tryb symulacji.
 
 **Laboratoria** budują gotową topologię i sprawdzają wynik, a nie sposób wykonania. Przycisk „Sprawdź wyniki”
 uruchamia testy na kopii sieci: pingi, strony WWW, trasy, sąsiedztwa OSPF, porty zablokowane przez STP.
+Niektóre sprawdzenia celowo psują osobną kopię, np. podłączają obcy laptop albo odłączają kabel w kanale.
 Każde laboratorium ma w testach jednostkowych skrypt rozwiązania, który udowadnia, że da się je zaliczyć.
 
 ## Funkcje
@@ -64,14 +68,14 @@ Każde laboratorium ma w testach jednostkowych skrypt rozwiązania, który udowa
 | `#/` | Pulpit: postęp, ranga, seria dni nauki, poziomy i skróty do ćwiczeń |
 | `#/nauka` | Ścieżka nauki: 5 poziomów, 20 modułów, laboratoria przy każdym poziomie |
 | `#/nauka/:modul` | Lekcja w rozdziałach z diagramami, przykładami CLI i quizem na końcu |
-| `#/laboratoria`, `#/lab/:id` | 17 zadań w symulatorze z instrukcją, podpowiedziami i oceną |
-| `#/symulator` | Własna sieć od zera albo z jednego z 4 szablonów, zapis i odczyt pliku |
+| `#/laboratoria`, `#/lab/:id` | 21 zadań w symulatorze z instrukcją, podpowiedziami i oceną |
+| `#/symulator` | Własna sieć od zera albo z jednego z 4 szablonów, plik, link do sieci i obraz PNG |
 | `#/gry`, `#/gry/:id` | 10 minigier: binarnie, podsieci, porty, OSI, tablica MAC, routing, IPv6, diagnostyka, CLI na czas |
 | `#/quizy`, `#/quiz/:id` | Quizy modułów, szybki miks i powtórka błędów |
 | `#/egzamin` | Egzamin końcowy: 30 pytań w 45 minut i sieć do skonfigurowania |
-| `#/slownik` | 77 pojęć z wyszukiwarką |
+| `#/slownik` | 82 pojęcia z wyszukiwarką |
 | `#/urzadzenia` | Sprzęt 2026 i lista technologii, których już się nie używa |
-| `#/ustawienia` | Język, ograniczenie animacji, terminal, kopia zapasowa postępu |
+| `#/ustawienia` | Język, ograniczenie animacji, terminal, instalacja aplikacji, kopia zapasowa postępu |
 
 **Symulator**
 
@@ -81,11 +85,26 @@ Każde laboratorium ma w testach jednostkowych skrypt rozwiązania, który udowa
 - Kable miedziane i światłowodowe z kontrolą typu portu, diody portów, zasięg Wi-Fi i zasilanie PoE.
 - CLI: tryby, skróty poleceń, pomoc pod `?`, dopełnianie klawiszem Tab, komunikaty błędów jak na sprzęcie,
   `show running-config`, `show ip route`, `show vlan brief`, `show spanning-tree`, `show ip ospf neighbor`,
-  `show ip nat translations` i inne.
+  `show ip nat translations`, `show etherchannel summary`, `show vrrp brief`, `show standby brief`,
+  `show port-security`, `show ip dhcp snooping binding` i inne.
 - Wiersz poleceń komputerów po polsku lub angielsku: `ipconfig`, `ping`, `tracert`, `nslookup`, `arp -a`,
   `curl`, `ssh`, `telnet`.
 - Panele graficzne, które wykonują prawdziwe polecenia CLI i pokazują je pod formularzem.
 - Tryb symulacji: odtwarzanie krok po kroku, filtry protokołów, szczegóły pakietu warstwa po warstwie.
+- Bezpieczeństwo warstwy 2: port security (limit adresów, sticky, reakcje shutdown, restrict i protect, stan
+  err-disabled) oraz DHCP snooping z portami zaufanymi i tablicą powiązań.
+- Redundancja: EtherChannel z LACP (active, passive) i trybem on, zawieszanie niezgodnych portów, zapasowa brama
+  VRRP i HSRP z przełączeniem po awarii.
+- Link do sieci: topologia zapisana w adresie strony (kompresja deflate), bez serwera. Odbiorca potwierdza
+  zastąpienie swojej sieci, a uszkodzony lub spreparowany link jest odrzucany.
+- Eksport planszy do PNG w podwójnej rozdzielczości, z osadzonymi fontami projektu.
+
+**Aplikacja**
+
+- Strony ładują się osobno, więc pierwsze wejście pobiera około połowy kodu, a resztę przeglądarka dociąga
+  w tle.
+- PWA: manifest z ikonami i skrótami, instalacja na telefonie i komputerze, praca bez internetu i komunikat
+  o nowej wersji z przyciskiem odświeżenia.
 
 ## Zrzuty ekranu
 
@@ -141,9 +160,9 @@ npm run dev             # http://127.0.0.1:4400
 | `npm run dev` | Serwer deweloperski Vite na porcie 4400 |
 | `npm run build` | Sprawdzenie typów TypeScript i build do `dist/` |
 | `npm run preview` | Podgląd builda na porcie 4401 |
-| `npm test` | 58 testów jednostkowych (silnik, CLI, laboratoria, treści) |
-| `npm run test:e2e` | 30 testów Playwright z kontrolą dostępności axe (desktop i telefon) |
-| `node scripts/assets.mjs` | Ponowne wygenerowanie favicony, ikony i obrazu Open Graph |
+| `npm test` | 84 testy jednostkowe (silnik, CLI, laboratoria, link do sieci, treści) |
+| `npm run test:e2e` | 42 testy Playwright z kontrolą dostępności axe, także tryb offline na buildzie |
+| `node scripts/assets.mjs` | Ponowne wygenerowanie favicony, ikon aplikacji i obrazu Open Graph |
 
 Projekt nie ma backendu, bazy danych ani zmiennych środowiskowych. Postęp zapisuje się w `localStorage`
 przeglądarki, a w Ustawieniach można go pobrać do pliku JSON i wczytać na innym komputerze.
@@ -152,6 +171,8 @@ przeglądarki, a w Ustawieniach można go pobrać do pliku JSON i wczytać na in
 
 Build w `dist/` to zwykłe pliki statyczne. Routing działa przez `#`, a ścieżki zasobów są względne
 (`base: './'`), więc strona działa na GitHub Pages w podkatalogu repozytorium bez dodatkowej konfiguracji.
+Service worker (`dist/sw.js`) powstaje przy każdym buildzie z listą plików i wersją liczoną z ich zawartości,
+więc po publikacji użytkownicy dostaną komunikat o nowej wersji. W trybie deweloperskim service worker jest wyłączony.
 
 Docelowy adres to `https://szymonkaczmarczyk.github.io/panrouter/` (ustawiony w `index.html`, `public/robots.txt`
 i `public/sitemap.xml`). Przy zmianie domeny popraw te trzy pliki.
@@ -174,7 +195,8 @@ src/
 tests/
   unit/             Vitest: silnik, CLI, szablony, laboratoria, treści
   e2e/              Playwright z axe-core
-public/             favicon, obraz Open Graph, robots.txt, sitemap.xml, 404.html
+public/             favicon, ikony aplikacji, manifest, obraz Open Graph, robots.txt, sitemap.xml, 404.html
+scripts/            generator ikon i obrazu OG, wtyczka budująca service worker
 docs/screenshots/   zrzuty ekranu używane w README
 ```
 
@@ -184,7 +206,8 @@ docs/screenshots/   zrzuty ekranu używane w README
 - Tekst wpisywany przez użytkownika trafia do interfejsu wyłącznie jako tekst, bez wstawiania HTML.
 - Hasła w symulowanych konfiguracjach (`enable secret`, `username ... secret`) są zapisywane jako skróty,
   tak jak uczy tego kurs.
-- Importowane pliki sieci i postępu są sprawdzane pod kątem formatu i rozmiaru.
+- Sieci z pliku, z linku i z pamięci przeglądarki przechodzą walidację: każde pole ma sprawdzany typ i zakres,
+  nieznane pola są odrzucane, a dekompresja linku ma limit rozmiaru.
 - Treści o bezpieczeństwie mają charakter obronny. Kurs przypomina, że testować wolno tylko własne sieci
   albo sieci, na które ma się pisemną zgodę.
 

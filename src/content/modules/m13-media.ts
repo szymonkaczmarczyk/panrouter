@@ -183,7 +183,6 @@ export const m13: Module = {
       kind: 'input',
       q: l('Jaka jest maksymalna długość kanału dla skrętki Ethernet (w metrach)?', 'What is the maximum Ethernet twisted pair channel length (in meters)?'),
       answer: ['100', '100 m', '100m'],
-      placeholder: '100',
       explain: l('Standard Ethernet na skrętce przewiduje do 100 m, łącznie z patchcordami.', 'Twisted pair Ethernet is specified up to 100 m including patch cords.'),
     },
     {
