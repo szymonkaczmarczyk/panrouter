@@ -1,5 +1,7 @@
 # PanRouter
 
+**Polski** · [English](README.en.md)
+
 > Sieci komputerowe od zera do eksperta. Po polsku, w przeglądarce.
 
 PanRouter to symulator sieci komputerowych w duchu Cisco Packet Tracer połączony z pełnym kursem. Na planszy
