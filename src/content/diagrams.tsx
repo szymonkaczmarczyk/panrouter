@@ -128,7 +128,7 @@ const DIAGRAMS: Record<DiagramId, () => preact.JSX.Element> = {
     </Frame>
   ),
   'home-network': () => (
-    <Frame w={640} h={240} title={tx('Typowa sieć domowa', 'A typical home network')}>
+    <Frame w={640} h={262} title={tx('Typowa sieć domowa', 'A typical home network')}>
       <Node kind="internet" x={60} y={110} label={tx('dostawca', 'provider')} />
       <Box x={130} y={92} w={110} h={36} label="ONT" sub={tx('światłowód', 'fiber')} tone="warn" />
       <Node kind="homeRouter" x={330} y={110} label={tx('router Wi-Fi 7', 'Wi-Fi 7 router')} sub="192.168.1.1" />
@@ -140,7 +140,7 @@ const DIAGRAMS: Record<DiagramId, () => preact.JSX.Element> = {
       <Line x1={352} y1={102} x2={498} y2={44} dashed tone="accent" />
       <Line x1={352} y1={110} x2={558} y2={120} dashed tone="accent" />
       <Line x1={352} y1={120} x2={478} y2={186} tone="info" />
-      <Text x={330} y={215} cls="dg-sub">
+      <Text x={320} y={254} cls="dg-sub">
         {tx('NAT: wszyscy wychodzą do internetu pod jednym adresem publicznym', 'NAT: everyone reaches the internet behind one public address')}
       </Text>
     </Frame>
@@ -247,7 +247,7 @@ const DIAGRAMS: Record<DiagramId, () => preact.JSX.Element> = {
     );
   },
   'switch-learning': () => (
-    <Frame w={640} h={250} title={tx('Przełącznik uczy się adresów MAC', 'A switch learns MAC addresses')}>
+    <Frame w={640} h={270} title={tx('Przełącznik uczy się adresów MAC', 'A switch learns MAC addresses')}>
       <Node kind="switch" x={200} y={120} label="SW1" />
       <Node kind="pc" x={60} y={50} label="A" sub="aa:aa" />
       <Node kind="pc" x={60} y={200} label="B" sub="bb:bb" />
@@ -258,7 +258,7 @@ const DIAGRAMS: Record<DiagramId, () => preact.JSX.Element> = {
       <Text x={120} y={74} cls="dg-sub">
         Gi1
       </Text>
-      <Text x={120} y={176} cls="dg-sub">
+      <Text x={136} y={186} cls="dg-sub">
         Gi2
       </Text>
       <Text x={270} y={110} cls="dg-sub">
@@ -308,14 +308,20 @@ const DIAGRAMS: Record<DiagramId, () => preact.JSX.Element> = {
     </Frame>
   ),
   'router-on-stick': () => (
-    <Frame w={640} h={260} title={tx('Router na patyku', 'Router on a stick')}>
-      <Node kind="router" x={320} y={50} label="R1" sub="Gi0/0/0.10  Gi0/0/0.20" />
+    <Frame w={640} h={280} title={tx('Router na patyku', 'Router on a stick')}>
+      <Node kind="router" x={320} y={50} />
+      <Text x={290} y={46} anchor="end">
+        R1
+      </Text>
+      <Text x={290} y={62} cls="dg-sub" anchor="end">
+        Gi0/0/0.10, Gi0/0/0.20
+      </Text>
       <Node kind="switch" x={320} y={160} label="SW1" />
       <Node kind="pc" x={140} y={210} label="192.168.10.10" sub="VLAN 10" />
       <Node kind="pc" x={500} y={210} label="192.168.20.10" sub="VLAN 20" />
       <line x1={316} y1={74} x2={316} y2={138} class="dg-line dg-stroke-info" />
       <line x1={324} y1={74} x2={324} y2={138} class="dg-line dg-stroke-warn" />
-      <Text x={420} y={110} cls="dg-sub">
+      <Text x={340} y={110} cls="dg-sub" anchor="start">
         {tx('jeden kabel, trunk', 'one cable, trunk')}
       </Text>
       <Line x1={298} y1={168} x2={162} y2={204} tone="info" />
@@ -450,11 +456,14 @@ const DIAGRAMS: Record<DiagramId, () => preact.JSX.Element> = {
   ),
   'stp-loop': () => (
     <Frame w={640} h={250} title={tx('STP blokuje pętlę', 'STP blocks the loop')}>
-      <Node kind="switch" x={320} y={45} label={tx('SW1 (most główny)', 'SW1 (root bridge)')} />
+      <Node kind="switch" x={320} y={62} />
+      <Text x={320} y={28}>
+        {tx('SW1 (most główny)', 'SW1 (root bridge)')}
+      </Text>
       <Node kind="switch" x={170} y={190} label="SW2" />
       <Node kind="switch" x={470} y={190} label="SW3" />
-      <Line x1={302} y1={60} x2={188} y2={174} tone="ok" />
-      <Line x1={338} y1={60} x2={452} y2={174} tone="ok" />
+      <Line x1={302} y1={78} x2={188} y2={174} tone="ok" />
+      <Line x1={338} y1={78} x2={452} y2={174} tone="ok" />
       <Line x1={192} y1={190} x2={448} y2={190} tone="warn" dashed />
       <circle cx={420} cy={190} r={9} class="dg-fill-warn" />
       <Text x={320} y={215} cls="dg-label">
@@ -520,17 +529,23 @@ const DIAGRAMS: Record<DiagramId, () => preact.JSX.Element> = {
     </Frame>
   ),
   'spine-leaf': () => (
-    <Frame w={640} h={230} title={tx('Architektura spine-leaf w centrum danych', 'Spine-leaf data center architecture')}>
-      <Node kind="l3switch" x={220} y={45} label="SPINE1" />
-      <Node kind="l3switch" x={420} y={45} label="SPINE2" />
-      {[100, 250, 390, 540].map((x, i) => (
+    <Frame w={640} h={250} title={tx('Architektura spine-leaf w centrum danych', 'Spine-leaf data center architecture')}>
+      {[220, 420].map((x, i) => (
         <g key={x}>
-          <Node kind="l3switch" x={x} y={160} label={`LEAF${i + 1}`} />
-          <Line x1={220} y1={67} x2={x} y2={138} tone="accent" />
-          <Line x1={420} y1={67} x2={x} y2={138} tone="accent" />
+          <Node kind="l3switch" x={x} y={60} />
+          <Text x={x} y={26}>
+            {`SPINE${i + 1}`}
+          </Text>
         </g>
       ))}
-      <Text x={320} y={222} cls="dg-sub">
+      {[100, 250, 390, 540].map((x, i) => (
+        <g key={x}>
+          <Node kind="l3switch" x={x} y={172} label={`LEAF${i + 1}`} />
+          <Line x1={220} y1={82} x2={x} y2={150} tone="accent" />
+          <Line x1={420} y1={82} x2={x} y2={150} tone="accent" />
+        </g>
+      ))}
+      <Text x={320} y={240} cls="dg-sub">
         {tx('Każdy leaf łączy się z każdym spine: zawsze dwa skoki między serwerami.', 'Every leaf connects to every spine: always two hops between servers.')}
       </Text>
     </Frame>
