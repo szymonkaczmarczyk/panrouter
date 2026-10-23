@@ -1,5 +1,6 @@
 import type { Simulator } from '../engine';
 import { formatMacCisco, hostCount, ipToStr, prefixToMask } from '../ip';
+import { formatIpv6 } from '../ip6';
 import { modelOf } from '../catalog';
 import type { L3If, Route } from '../topology';
 import { parseVlanList, RADIO_PREFIX } from '../topology';
@@ -465,6 +466,8 @@ function l3Extras(cfg: Port | VirtualIf, lines: string[]): void {
   if (cfg.aclIn) lines.push(` ip access-group ${cfg.aclIn} in`);
   if (cfg.aclOut) lines.push(` ip access-group ${cfg.aclOut} out`);
   if (cfg.ospfCost) lines.push(` ip ospf cost ${cfg.ospfCost}`);
+  if (cfg.ipv6Enable) lines.push(' ipv6 enable');
+  for (const address of cfg.ipv6) lines.push(` ipv6 address ${address.toUpperCase()}`);
   const group = cfg.fhrp;
   if (!group) return;
   if (group.proto === 'vrrp') {
@@ -517,6 +520,7 @@ export function runningConfig(_sim: Simulator, device: Device): string[] {
     if (device.dhcpSnooping.enabled || device.dhcpSnooping.vlans.length) out.push('!');
   }
   if (device.kind === 'l3switch' && device.ipRouting) out.push('ip routing', '!');
+  if (device.ipv6Routing) out.push('ipv6 unicast-routing', '!');
   for (const group of [...new Set(device.ports.filter((p) => p.switchport && p.channelGroup > 0).map((p) => p.channelGroup))].sort((a, b) => a - b)) {
     const reference = device.ports.find((p) => p.switchport && p.channelGroup === group)!;
     const lines = [`interface Port-channel${group}`];
@@ -553,6 +557,7 @@ export function runningConfig(_sim: Simulator, device: Device): string[] {
     out.push(`ip route ${route.net} ${maskStr(route.prefix)} ${route.iface || route.via}${route.iface && route.via ? ` ${route.via}` : ''}${route.ad !== 1 ? ` ${route.ad}` : ''}`);
   }
   if (device.defaultGateway) out.push(`ip default-gateway ${device.defaultGateway}`);
+  for (const route of device.routes6) out.push(`ipv6 route ${route.net.toUpperCase()}/${route.prefix}${route.iface ? ` ${route.iface}` : ''}${route.via ? ` ${route.via.toUpperCase()}` : ''}`);
   if (m.sshV2) out.push('ip ssh version 2');
   out.push('!');
   for (const acl of device.acls) {
@@ -576,6 +581,44 @@ export function runningConfig(_sim: Simulator, device: Device): string[] {
   if (m.vtyTransport) out.push(` transport input ${m.vtyTransport}`);
   out.push('!', 'end');
   return out;
+}
+
+const upper6 = (value: bigint) => formatIpv6(value).toUpperCase();
+
+export function showIpv6IntBrief(sim: Simulator, device: Device): string[] {
+  const lines: string[] = [];
+  const l3 = sim.topo.l3Ifs(device);
+  const names = [...device.ports.filter((p) => !p.switchport).map((p) => p.name), ...device.vifs.map((v) => v.name)];
+  for (const name of names) {
+    const port = device.ports.find((p) => p.name === name) ?? null;
+    const vif = device.vifs.find((v) => v.name === name) ?? null;
+    const entry = l3.find((e) => e.name === name) ?? null;
+    const { status, protocol } = ifStatus(sim, device, entry, port, vif);
+    lines.push(`${pad(name, 31)}[${status}/${protocol}]`);
+    const v6 = sim.topo.ip6If(device, name);
+    if (!v6) lines.push('    unassigned');
+    else for (const a of v6.addrs) lines.push(`    ${upper6(a.addr)}`);
+  }
+  return lines.length ? lines : [''];
+}
+
+export function showIpv6Route(sim: Simulator, device: Device): string[] {
+  const routes = sim.topo.routes6(device);
+  const lines = [`IPv6 Routing Table - default - ${routes.length} entries`, 'Codes: C - Connected, L - Local, S - Static, ND - ND Default', ''];
+  for (const route of routes) {
+    const ad = route.code === 'S' ? '[1/0]' : route.code === 'ND' ? '[2/0]' : '[0/0]';
+    lines.push(`${pad(route.code, 4)}${upper6(route.net)}/${route.prefix} ${ad}`);
+    if (route.code === 'C') lines.push(`     via ${route.ifName}, directly connected`);
+    else if (route.code === 'L') lines.push(`     via ${route.ifName}, receive`);
+    else lines.push(`     via ${route.via !== null ? upper6(route.via) : ''}${route.ifName ? `, ${route.ifName}` : ''}`);
+  }
+  return lines;
+}
+
+export function showIpv6Neighbors(sim: Simulator, device: Device): string[] {
+  const lines = [`${pad('IPv6 Address', 42)}${pad('Age', 4)}${pad('Link-layer Addr', 16)}${pad('State', 6)}Interface`];
+  for (const entry of sim.ndTable(device)) lines.push(`${pad(upper6(entry.ip), 42)}${pad(0, 4)}${pad(formatMacCisco(entry.mac), 16)}${pad('REACH', 6)}${shortIfName(device, entry.ifName)}`);
+  return lines;
 }
 
 function compactList(ids: number[]): string {

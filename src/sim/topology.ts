@@ -1,5 +1,6 @@
 import { modelOf } from './catalog';
 import { inSubnet, networkOf, parseIp, wildcardToPrefix } from './ip';
+import { eui64, inSubnet6, isLinkLocal, linkLocal, network6, parseCidr6, parseIpv6 } from './ip6';
 import { blankPort, findDevice, isHost } from './network';
 import type { Device, FhrpProto, Link, LinkEnd, NatRole, Network, Port, VirtualIf } from './types';
 
@@ -86,6 +87,27 @@ export interface FhrpState {
   standbyIp: number | null;
 }
 
+export interface Addr6 {
+  addr: bigint;
+  prefix: number;
+  origin: 'static' | 'slaac' | 'link-local';
+}
+
+export interface Ip6If {
+  entry: L3If;
+  linkLocal: bigint;
+  addrs: Addr6[];
+  router: bigint | null;
+}
+
+export interface Route6 {
+  code: 'C' | 'L' | 'S' | 'ND';
+  net: bigint;
+  prefix: number;
+  via: bigint | null;
+  ifName: string;
+}
+
 export const RADIO_PREFIX = 'Radio:';
 
 export function adminDown(port: Port): boolean {
@@ -149,6 +171,8 @@ export class Topology {
   private ospfCache: { routes: Map<string, Route[]>; neighbors: Map<string, OspfNeighbor[]> } | null = null;
   private channelCache: Map<string, MemberState> | null = null;
   private fhrpCache: Map<string, FhrpState> | null = null;
+  private ip6Cache = new Map<string, Ip6If[]>();
+  private route6Cache = new Map<string, Route6[]>();
 
   constructor(net: Network) {
     this.net = net;
@@ -642,6 +666,117 @@ export class Topology {
     const resolved = this.resolveVia(device, route, table, 0);
     if (!resolved) return null;
     return { route, ifName: resolved.ifName, nextHop: resolved.nextHop ?? dst };
+  }
+
+  isRouting6(device: Device): boolean {
+    return (device.kind === 'router' || device.kind === 'l3switch') && device.ipv6Routing && this.isPowered(device);
+  }
+
+  ip6Ifs(device: Device): Ip6If[] {
+    const cached = this.ip6Cache.get(device.id);
+    if (cached) return cached;
+    const list: Ip6If[] = [];
+    this.ip6Cache.set(device.id, list);
+    for (const entry of this.l3Ifs(device)) {
+      const cfg = entry.cfg;
+      if (!entry.up || (entry.attach.kind === 'loop' && !cfg.ipv6.length)) continue;
+      if (!cfg.ipv6Enable && !cfg.ipv6.length && !cfg.ipv6Slaac) continue;
+      const ll = linkLocal(entry.mac);
+      const addrs: Addr6[] = [{ addr: ll, prefix: 64, origin: 'link-local' }];
+      for (const text of cfg.ipv6) {
+        const parsed = parseCidr6(text);
+        if (parsed && !isLinkLocal(parsed.addr)) addrs.push({ addr: parsed.addr, prefix: parsed.prefix, origin: 'static' });
+      }
+      let router: bigint | null = null;
+      if (cfg.ipv6Slaac && !this.isRouting6(device)) {
+        const reach = this.l2Reach(device, entry);
+        for (const key of reach) {
+          const [devId, ifName] = key.split('|');
+          const peer = this.devices.get(devId);
+          if (!peer || !this.isRouting6(peer)) continue;
+          const peerIf = this.l3Ifs(peer).find((e) => e.name === ifName && e.up);
+          if (!peerIf) continue;
+          const prefixes = peerIf.cfg.ipv6.map(parseCidr6).filter((p): p is { addr: bigint; prefix: number } => Boolean(p && p.prefix === 64 && !isLinkLocal(p.addr)));
+          if (!prefixes.length) continue;
+          router ??= linkLocal(peerIf.mac);
+          for (const prefix of prefixes) {
+            const addr = eui64(prefix.addr, entry.mac);
+            if (!addrs.some((a) => a.addr === addr)) addrs.push({ addr, prefix: 64, origin: 'slaac' });
+          }
+        }
+      }
+      list.push({ entry, linkLocal: ll, addrs, router });
+    }
+    return list;
+  }
+
+  ip6If(device: Device, name: string): Ip6If | undefined {
+    return this.ip6Ifs(device).find((i) => i.entry.name === name);
+  }
+
+  ownsIp6(device: Device, addr: bigint): Ip6If | undefined {
+    return this.ip6Ifs(device).find((i) => i.addrs.some((a) => a.addr === addr));
+  }
+
+  routes6(device: Device): Route6[] {
+    const cached = this.route6Cache.get(device.id);
+    if (cached) return cached;
+    const routes: Route6[] = [];
+    const ifs = this.ip6Ifs(device);
+    for (const i of ifs) {
+      for (const a of i.addrs) {
+        if (a.origin === 'link-local') continue;
+        const net = network6(a.addr, a.prefix);
+        if (!routes.some((r) => r.code === 'C' && r.net === net && r.prefix === a.prefix)) routes.push({ code: 'C', net, prefix: a.prefix, via: null, ifName: i.entry.name });
+        if (this.isRouting6(device)) routes.push({ code: 'L', net: a.addr, prefix: 128, via: null, ifName: i.entry.name });
+      }
+    }
+    if (this.isRouting6(device)) {
+      for (const r of device.routes6) {
+        const net = parseIpv6(r.net);
+        if (net === null) continue;
+        const via = r.via ? parseIpv6(r.via) : null;
+        const exit = r.iface ? ifs.find((i) => i.entry.name === r.iface) : undefined;
+        if (r.iface && !exit) continue;
+        if (!exit && via === null) continue;
+        if (!exit && via !== null && isLinkLocal(via)) continue;
+        routes.push({ code: 'S', net: network6(net, r.prefix), prefix: r.prefix, via, ifName: exit?.entry.name ?? '' });
+      }
+    } else {
+      const withGateway = ifs.find((i) => i.entry.cfg.gateway6 && parseIpv6(i.entry.cfg.gateway6) !== null);
+      const viaRa = ifs.find((i) => i.router !== null);
+      if (withGateway) routes.push({ code: 'S', net: 0n, prefix: 0, via: parseIpv6(withGateway.entry.cfg.gateway6)!, ifName: withGateway.entry.name });
+      else if (viaRa) routes.push({ code: 'ND', net: 0n, prefix: 0, via: viaRa.router, ifName: viaRa.entry.name });
+    }
+    routes.sort((a, b) => (a.net < b.net ? -1 : a.net > b.net ? 1 : a.prefix - b.prefix));
+    this.route6Cache.set(device.id, routes);
+    return routes;
+  }
+
+  lookup6(device: Device, dst: bigint, depth = 0): { route: Route6; ifName: string; nextHop: bigint } | null {
+    if (isLinkLocal(dst)) {
+      for (const i of this.ip6Ifs(device)) {
+        const reach = this.l2Reach(device, i.entry);
+        for (const key of reach) {
+          const [devId, ifName] = key.split('|');
+          const peer = this.devices.get(devId);
+          if (peer && this.ip6If(peer, ifName)?.linkLocal === dst) return { route: { code: 'C', net: 0xfe80n << 112n, prefix: 64, via: null, ifName: i.entry.name }, ifName: i.entry.name, nextHop: dst };
+        }
+      }
+      return null;
+    }
+    let best: Route6 | null = null;
+    for (const route of this.routes6(device)) {
+      if (!inSubnet6(dst, route.net, route.prefix)) continue;
+      if (!best || route.prefix > best.prefix) best = route;
+    }
+    if (!best) return null;
+    if (best.code === 'C' || best.code === 'L') return { route: best, ifName: best.ifName, nextHop: dst };
+    if (best.via === null) return { route: best, ifName: best.ifName, nextHop: dst };
+    if (best.ifName) return { route: best, ifName: best.ifName, nextHop: best.via };
+    if (depth > 3) return null;
+    const inner = this.lookup6(device, best.via, depth + 1);
+    return inner ? { route: best, ifName: inner.ifName, nextHop: inner.nextHop === best.via ? best.via : inner.nextHop } : null;
   }
 
   stpBlocked(dev: string, port: string): boolean {

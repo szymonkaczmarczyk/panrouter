@@ -2,6 +2,7 @@ import { l, type L10n, type Lang } from '../../i18n/l10n';
 import { ANY, hostSpec } from '../acl';
 import type { Simulator } from '../engine';
 import { broadcastOf, ipToStr, maskToPrefix, networkOf, parseIp } from '../ip';
+import { eui64, formatIpv6, inSubnet6, isLinkLocal, parseCidr6, parseIpv6 } from '../ip6';
 import { blankVif } from '../network';
 import type { Acl, AclEntry, AddrSpec, ChannelMode, Device, FhrpGroup, FhrpProto, Port, PortMatch, VirtualIf, ViolationMode } from '../types';
 import { resolveIface } from './iface';
@@ -275,6 +276,42 @@ function tracerouteOutput(ctx: Ctx, target: string): void {
   });
 }
 
+function ping6Output(ctx: Ctx, target: string, count = 5): void {
+  const dst = parseIpv6(target)!;
+  const label = formatIpv6(dst).toUpperCase();
+  ctx.out.push('Type escape sequence to abort.', `Sending ${count}, 100-byte ICMP Echos to ${label}, timeout is 2 seconds:`);
+  let marks = '';
+  const rtts: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const result = ctx.sim.echo6(ctx.device.id, dst);
+    if (result.outcome === 'reply') {
+      marks += '!';
+      rtts.push(Math.max(1, Math.round(result.rtt)));
+    } else if (result.outcome === 'net-unreachable' || result.outcome === 'host-unreachable') marks += 'U';
+    else if (result.outcome === 'no-route' || result.outcome === 'no-ip') {
+      ctx.out.push(marks, `% No valid route for destination`);
+      return;
+    } else marks += '.';
+  }
+  ctx.out.push(marks);
+  if (!rtts.length) return void ctx.out.push(`Success rate is 0 percent (0/${count})`);
+  const avg = Math.round(rtts.reduce((x, y) => x + y, 0) / rtts.length);
+  ctx.out.push(`Success rate is ${Math.round((rtts.length / count) * 100)} percent (${rtts.length}/${count}), round-trip min/avg/max = ${Math.min(...rtts)}/${avg}/${Math.max(...rtts)} ms`);
+}
+
+function traceroute6Output(ctx: Ctx, target: string): void {
+  const dst = parseIpv6(target)!;
+  ctx.out.push('Type escape sequence to abort.', `Tracing the route to ${formatIpv6(dst).toUpperCase()}`, '');
+  ctx.sim.traceroute6(ctx.device.id, dst).forEach((hop, index) => {
+    const n = String(index + 1).padStart(3);
+    if (hop.from === null) ctx.out.push(`${n} *  *  *`);
+    else {
+      const ms = Math.max(1, Math.round(hop.rtt));
+      ctx.out.push(`${n} ${formatIpv6(hop.from).toUpperCase()} ${ms} msec ${ms} msec ${ms} msec${hop.outcome === 'net-unreachable' ? ' !N' : ''}`);
+    }
+  });
+}
+
 function saveConfig(ctx: Ctx): void {
   ctx.out.push('Building configuration...', '[OK]');
   ctx.device.startup = show.runningConfig(ctx.sim, ctx.device).join('\n');
@@ -327,6 +364,10 @@ def(['user', 'priv'], 'terminal length <num:n:0-512>', () => {});
 def(['user', 'priv'], 'ping <ip:target>', (ctx, a) => pingOutput(ctx, a.target as string));
 def(['user', 'priv'], 'ping <ip:target> repeat <num:count:1-100>', (ctx, a) => pingOutput(ctx, a.target as string, a.count as number));
 def(['user', 'priv'], 'traceroute <ip:target>', (ctx, a) => tracerouteOutput(ctx, a.target as string));
+for (const prefix of ['', 'ipv6 ']) {
+  def(['user', 'priv'], `ping ${prefix}<ip6:target>`, (ctx, a) => ping6Output(ctx, a.target as string), [...ROUTERS]);
+  def(['user', 'priv'], `traceroute ${prefix}<ip6:target>`, (ctx, a) => traceroute6Output(ctx, a.target as string), [...ROUTERS]);
+}
 
 const showDefs: [string, (ctx: Ctx, args: Args) => string[], Device['kind'][]?, Mode[]?][] = [
   ['show running-config', (c) => show.runningConfig(c.sim, c.device), undefined, ['priv']],
@@ -340,6 +381,9 @@ const showDefs: [string, (ctx: Ctx, args: Args) => string[], Device['kind'][]?, 
   ['show vlan', (c) => show.showVlanBrief(c.sim, c.device), [...SWITCHES]],
   ['show mac address-table', (c) => show.showMacTable(c.sim, c.device), [...SWITCHES]],
   ['show ip route', (c) => show.showIpRoute(c.sim, c.device)],
+  ['show ipv6 interface brief', (c) => show.showIpv6IntBrief(c.sim, c.device), [...ROUTERS]],
+  ['show ipv6 route', (c) => show.showIpv6Route(c.sim, c.device), [...ROUTERS]],
+  ['show ipv6 neighbors', (c) => show.showIpv6Neighbors(c.sim, c.device), [...ROUTERS]],
   ['show ip arp', (c) => show.showArp(c.sim, c.device)],
   ['show arp', (c) => show.showArp(c.sim, c.device)],
   ['show ip ospf neighbor', (c) => show.showOspfNeighbors(c.sim, c.device), [...ROUTERS]],
@@ -992,6 +1036,70 @@ for (const [proto, word, range] of [['vrrp', 'vrrp', '1-255'], ['hsrp', 'standby
 }
 def(IF_MODES, 'standby version <num:v:1-2>', () => {}, [...ROUTERS]);
 
+def(['config'], 'ipv6 unicast-routing', (ctx) => {
+  ctx.device.ipv6Routing = true;
+  mark(ctx);
+}, [...ROUTERS]);
+def(['config'], 'no ipv6 unicast-routing', (ctx) => {
+  ctx.device.ipv6Routing = false;
+  mark(ctx);
+}, [...ROUTERS]);
+
+function addRoute6(ctx: Ctx, args: Args): void {
+  const parsed = parseCidr6(args.net as string)!;
+  const via = (args.via as string | undefined) ?? '';
+  const iface = (args.if as string | undefined) ?? '';
+  if (via && isLinkLocal(parseIpv6(via)!) && !iface) return err(ctx, '% Interface has to be specified for a link-local nexthop');
+  const net = formatIpv6(parsed.addr);
+  ctx.device.routes6 = ctx.device.routes6.filter((r) => !(r.net === net && r.prefix === parsed.prefix && r.via === via && r.iface === iface));
+  ctx.device.routes6.push({ net, prefix: parsed.prefix, via: via ? formatIpv6(parseIpv6(via)!) : '', iface });
+  mark(ctx);
+}
+for (const tail of ['<ip6:via>', '<iface:if>', '<iface:if> <ip6:via>']) def(['config'], `ipv6 route <ip6p:net> ${tail}`, addRoute6, [...ROUTERS]);
+def(['config'], 'no ipv6 route <ip6p:net>', (ctx, a) => {
+  const parsed = parseCidr6(a.net as string)!;
+  const net = formatIpv6(parsed.addr);
+  const before = ctx.device.routes6.length;
+  ctx.device.routes6 = ctx.device.routes6.filter((r) => !(r.net === net && r.prefix === parsed.prefix));
+  if (ctx.device.routes6.length === before) err(ctx, '%No matching route to delete');
+  mark(ctx);
+}, [...ROUTERS]);
+
+function forIpv6Targets(ctx: Ctx, apply: (target: Port | VirtualIf) => void): void {
+  for (const target of targetsL3(ctx)) {
+    if ('switchport' in target && target.switchport) {
+      err(ctx, '% IPv6 addresses may not be configured on L2 links.');
+      continue;
+    }
+    apply(target);
+  }
+  mark(ctx);
+}
+
+function addIpv6Address(ctx: Ctx, text: string, useEui: boolean): void {
+  const parsed = parseCidr6(text)!;
+  if (isLinkLocal(parsed.addr)) return err(ctx, '% Link-local addresses are created automatically in this simulator');
+  if (useEui && parsed.prefix !== 64) return err(ctx, '% EUI-64 requires a /64 prefix');
+  forIpv6Targets(ctx, (target) => {
+    const mac = 'mac' in target ? target.mac : (ctx.device.ports.find((p) => p.name === target.parent)?.mac ?? ctx.device.baseMac);
+    const addr = useEui ? eui64(parsed.addr, mac) : parsed.addr;
+    const others = ctx.device.ports.filter((p) => p !== target).flatMap((p) => p.ipv6).concat(ctx.device.vifs.filter((v) => v !== target).flatMap((v) => v.ipv6));
+    const clash = others.map(parseCidr6).find((o) => o && inSubnet6(addr, o.addr, Math.min(o.prefix, parsed.prefix)));
+    if (clash) return err(ctx, `% ${formatIpv6(addr)}/${parsed.prefix} overlaps with another interface`);
+    const value = `${formatIpv6(addr)}/${parsed.prefix}`;
+    if (!target.ipv6.includes(value)) target.ipv6 = [...target.ipv6, value];
+  });
+}
+def(IF_MODES, 'ipv6 address <ip6p:addr>', (ctx, a) => addIpv6Address(ctx, a.addr as string, false), [...ROUTERS]);
+def(IF_MODES, 'ipv6 address <ip6p:addr> eui-64', (ctx, a) => addIpv6Address(ctx, a.addr as string, true), [...ROUTERS]);
+def(IF_MODES, 'no ipv6 address', (ctx) => forIpv6Targets(ctx, (t) => (t.ipv6 = [])), [...ROUTERS]);
+def(IF_MODES, 'no ipv6 address <ip6p:addr>', (ctx, a) => {
+  const parsed = parseCidr6(a.addr as string)!;
+  forIpv6Targets(ctx, (t) => (t.ipv6 = t.ipv6.filter((v) => parseCidr6(v)?.addr !== parsed.addr)));
+}, [...ROUTERS]);
+def(IF_MODES, 'ipv6 enable', (ctx) => forIpv6Targets(ctx, (t) => (t.ipv6Enable = true)), [...ROUTERS]);
+def(IF_MODES, 'no ipv6 enable', (ctx) => forIpv6Targets(ctx, (t) => (t.ipv6Enable = false)), [...ROUTERS]);
+
 def(['subif'], 'encapsulation dot1q <num:v:1-4094>', (ctx, a) => {
   const vif = ctx.device.vifs.find((v) => v.name === ctx.session.ifaces[0]);
   if (!vif) return;
@@ -1297,7 +1405,7 @@ const HELP: Record<string, L10n> = {
   version: l('Wersja systemu', 'System hardware and software status'),
   clock: l('Zegar systemowy', 'Display the system clock'),
   lldp: l('Protokół wykrywania sąsiadów LLDP', 'LLDP information'),
-  neighbors: l('Sąsiednie urządzenia', 'LLDP neighbor entries'),
+  neighbors: l('Sąsiednie urządzenia', 'Neighbor entries'),
   history: l('Historia poleceń', 'Display the session command history'),
   hostname: l('Nazwa urządzenia', 'Set system\'s network name'),
   no: l('Negacja polecenia lub przywrócenie wartości domyślnych', 'Negate a command or set its defaults'),
@@ -1391,6 +1499,9 @@ const HELP: Record<string, L10n> = {
   'dns-server': l('Serwer DNS dla klientów', 'DNS servers'),
   lease: l('Czas dzierżawy', 'Address lease time'),
   repeat: l('Liczba pakietów', 'Specify repeat count'),
+  ipv6: l('Polecenia IPv6', 'IPv6 commands'),
+  'unicast-routing': l('Włączenie routingu IPv6', 'Enable unicast routing'),
+  'eui-64': l('Identyfikator interfejsu z adresu MAC', 'Use eui-64 interface identifier'),
   'port-security': l('Ochrona portu limitem adresów MAC', 'Secure the port with a MAC address limit'),
   maximum: l('Największa liczba adresów MAC', 'Max secure addresses'),
   violation: l('Reakcja na naruszenie', 'Security violation mode'),

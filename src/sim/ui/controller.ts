@@ -2,10 +2,12 @@ import { signal } from '@preact/signals';
 import { cliExecute, newSession, type CliSession } from '../cli/ios';
 import { newHostSession, type HostSession } from '../cli/host';
 import { Simulator } from '../engine';
-import { autoConnect, canConnect, connect, createDevice, removeDevice, removeLink, type ConnectError } from '../network';
+import { autoConnect, canConnect, connect, createDevice, createNote, removeDevice, removeLink, type ConnectError } from '../network';
 import type { CableType, DeviceKind, Link, LinkEnd, Network, TraceEvent } from '../types';
 
-export type Tool = 'select' | 'connect' | 'delete' | 'pdu';
+export type Tool = 'select' | 'connect' | 'note' | 'pdu' | 'delete';
+
+const HISTORY_LIMIT = 60;
 export type CableChoice = 'auto' | CableType;
 export type SimMode = 'realtime' | 'simulation';
 
@@ -37,9 +39,12 @@ export class SimController {
   selectedEvent = signal<number | null>(null);
   playing = signal(false);
   speed = signal(1);
-  filters = signal<Set<string>>(new Set(['ARP', 'ICMP', 'DHCP', 'DNS', 'TCP', 'HTTP', 'HTTPS', 'UDP']));
+  filters = signal<Set<string>>(new Set(['ARP', 'ICMP', 'DHCP', 'DNS', 'TCP', 'HTTP', 'HTTPS', 'UDP', 'ICMPv6', 'NDP']));
   panel = signal<PanelState | null>(null);
   selected = signal<string | null>(null);
+  multi = signal<string[]>([]);
+  canUndo = signal(false);
+  canRedo = signal(false);
   connectFrom = signal<LinkEnd | null>(null);
   pduFrom = signal<string | null>(null);
   placing = signal<DeviceKind | null>(null);
@@ -48,13 +53,63 @@ export class SimController {
   cliSessions = new Map<string, CliSession>();
   hostSessions = new Map<string, HostSession>();
   private persist: (net: Network) => void;
+  private store: (net: Network) => void;
   private gui = new Map<string, CliSession>();
+  private history: string[] = [];
+  private future: string[] = [];
 
   constructor(net: Network, persist: (net: Network) => void) {
     this.net = net;
-    this.persist = persist;
+    this.store = persist;
+    this.persist = (next) => {
+      persist(next);
+      this.record();
+    };
     this.sim = new Simulator(net);
     this.sim.onTrace = (events) => this.onTrace(events);
+    this.history = [JSON.stringify(net)];
+  }
+
+  private record(): void {
+    const snapshot = JSON.stringify(this.net);
+    if (snapshot === this.history[this.history.length - 1]) return;
+    this.history.push(snapshot);
+    if (this.history.length > HISTORY_LIMIT) this.history.shift();
+    this.future = [];
+    this.syncHistory();
+  }
+
+  private syncHistory(): void {
+    this.canUndo.value = this.history.length > 1;
+    this.canRedo.value = this.future.length > 0;
+  }
+
+  private restore(snapshot: string): void {
+    const net = JSON.parse(snapshot) as Network;
+    this.net = net;
+    this.sim.reset(net);
+    const ids = new Set(net.devices.map((d) => d.id));
+    if (this.panel.value && !ids.has(this.panel.value.dev)) this.panel.value = null;
+    if (this.selected.value && !ids.has(this.selected.value)) this.selected.value = null;
+    this.multi.value = this.multi.value.filter((id) => ids.has(id));
+    this.store(net);
+    this.syncHistory();
+    this.rev.value++;
+  }
+
+  undo(): boolean {
+    if (this.history.length < 2) return false;
+    this.future.push(this.history.pop()!);
+    this.restore(this.history[this.history.length - 1]);
+    return true;
+  }
+
+  redo(): boolean {
+    const next = this.future.pop();
+    if (!next) return false;
+    this.history.push(next);
+    this.restore(next);
+    return true;
   }
 
   load(net: Network): void {
@@ -65,6 +120,7 @@ export class SimController {
     this.selectedEvent.value = null;
     this.panel.value = null;
     this.selected.value = null;
+    this.multi.value = [];
     this.terminals.clear();
     this.cliSessions.clear();
     this.hostSessions.clear();
@@ -125,6 +181,64 @@ export class SimController {
       if (wireless) this.changed();
       else this.saveOnly();
     } else this.bump();
+  }
+
+  moveDevices(ids: string[], dx: number, dy: number, commit: boolean): void {
+    const moved = this.net.devices.filter((d) => ids.includes(d.id));
+    for (const device of moved) {
+      device.x = Math.round(device.x + dx);
+      device.y = Math.round(device.y + dy);
+    }
+    if (!commit) return this.bump();
+    const wireless = moved.some((d) => d.kind === 'ap' || d.kind === 'homeRouter' || d.ports.some((p) => p.media === 'wireless'));
+    if (wireless) this.changed();
+    else this.saveOnly();
+  }
+
+  deleteDevices(ids: string[]): void {
+    for (const id of ids) {
+      removeDevice(this.net, id);
+      this.terminals.delete(id);
+      this.cliSessions.delete(id);
+      this.hostSessions.delete(id);
+    }
+    if (this.panel.value && ids.includes(this.panel.value.dev)) this.panel.value = null;
+    if (this.selected.value && ids.includes(this.selected.value)) this.selected.value = null;
+    this.multi.value = [];
+    this.changed();
+  }
+
+  addNote(x: number, y: number): string {
+    const note = createNote(this.net, x, y, '');
+    this.bump();
+    return note.id;
+  }
+
+  setNoteText(id: string, text: string): void {
+    const note = this.net.notes.find((n) => n.id === id);
+    if (!note) return;
+    const clean = text.trim().slice(0, 500);
+    if (!clean && !note.text) {
+      this.net.notes = this.net.notes.filter((n) => n.id !== id);
+      return this.bump();
+    }
+    if (!clean) return this.deleteNote(id);
+    note.text = clean;
+    this.saveOnly();
+  }
+
+  moveNote(id: string, x: number, y: number, commit: boolean): void {
+    const note = this.net.notes.find((n) => n.id === id);
+    if (!note) return;
+    note.x = Math.round(x);
+    note.y = Math.round(y);
+    if (commit) this.saveOnly();
+    else this.bump();
+  }
+
+  deleteNote(id: string): void {
+    this.net.notes = this.net.notes.filter((n) => n.id !== id);
+    this.saveOnly();
   }
 
   deleteDevice(id: string): void {

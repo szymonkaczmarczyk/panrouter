@@ -11,7 +11,7 @@ export const m44: Module = {
     'Adresy 128-bitowe, zapis i skracanie, rodzaje adresów, podsieci /64, SLAAC, NDP zamiast ARP i dual stack.',
     '128-bit addresses, notation and shortening, address types, /64 subnets, SLAAC, NDP instead of ARP and dual stack.',
   ),
-  labs: [],
+  labs: ['ipv6-podstawy', 'ipv6-trasy'],
   games: ['ipv6-kompresor'],
   sections: [
     {
@@ -91,7 +91,7 @@ export const m44: Module = {
               ['Dual stack', 'Urządzenie ma jednocześnie IPv4 i IPv6. To dziś najczęstszy sposób wdrożenia.'],
             ],
           },
-          { t: 'code', lines: ['R1(config)# ipv6 unicast-routing', 'R1(config)# interface g0/0/0', 'R1(config-if)# ipv6 address 2001:db8:acad:10::1/64', 'R1(config-if)# ipv6 address fe80::1 link-local'], caption: 'Przykładowa konfiguracja IPv6 na routerze w stylu IOS. Symulator PanRouter skupia się na IPv4, a IPv6 ćwiczysz w lekcji i minigrze.' },
+          { t: 'code', lines: ['R1(config)# ipv6 unicast-routing', 'R1(config)# interface g0/0/0', 'R1(config-if)# ipv6 address 2001:db8:acad:10::1/64', 'R1(config-if)# exit', 'R1(config)# ipv6 route ::/0 2001:db8:acad:99::1', 'R1# show ipv6 route'], caption: 'Konfiguracja IPv6 na routerze. W symulatorze komputery z SLAAC tworzą identyfikator interfejsu metodą EUI-64 z adresu MAC, tak jak routery i starsze systemy.' },
           { t: 'callout', kind: 'warn', text: 'Brak NAT nie oznacza braku ochrony. Zapora musi blokować nowe połączenia z internetu do urządzeń, tak samo jak w IPv4.' },
         ],
         en: [
@@ -105,7 +105,7 @@ export const m44: Module = {
               ['Dual stack', 'The device has IPv4 and IPv6 at the same time. This is the most common deployment today.'],
             ],
           },
-          { t: 'code', lines: ['R1(config)# ipv6 unicast-routing', 'R1(config)# interface g0/0/0', 'R1(config-if)# ipv6 address 2001:db8:acad:10::1/64', 'R1(config-if)# ipv6 address fe80::1 link-local'], caption: 'Sample IOS-style IPv6 router configuration. The PanRouter simulator focuses on IPv4, and you practice IPv6 in the lesson and the mini-game.' },
+          { t: 'code', lines: ['R1(config)# ipv6 unicast-routing', 'R1(config)# interface g0/0/0', 'R1(config-if)# ipv6 address 2001:db8:acad:10::1/64', 'R1(config-if)# exit', 'R1(config)# ipv6 route ::/0 2001:db8:acad:99::1', 'R1# show ipv6 route'], caption: 'IPv6 router configuration. In the simulator, SLAAC computers build the interface ID with EUI-64 from the MAC address, like routers and older systems do.' },
           { t: 'callout', kind: 'warn', text: 'No NAT does not mean no protection. The firewall must block new connections from the internet to devices, just like with IPv4.' },
         ],
       },
@@ -120,5 +120,7 @@ export const m44: Module = {
     { id: 'q44-6', kind: 'single', q: l('Czy w IPv6 są rozgłoszenia?', 'Does IPv6 have broadcasts?'), options: [l('Tak', 'Yes'), l('Nie, zastępuje je multicast', 'No, multicast replaces them')], answer: 1, explain: l('IPv6 nie ma rozgłoszeń, używa grup multicast.', 'IPv6 has no broadcast, it uses multicast groups.') },
     { id: 'q44-7', kind: 'single', q: l('Ile razy może wystąpić :: w adresie?', 'How many times can :: appear in an address?'), options: [l('Raz', 'Once'), l('Dwa razy', 'Twice'), l('Dowolnie', 'Any'), l('Wcale', 'Never')], answer: 0, explain: l('Inaczej nie dałoby się ustalić, ile zer kryje każde ::.', 'Otherwise you could not tell how many zeros each :: hides.') },
     { id: 'q44-8', kind: 'single', q: l('Co oznacza dual stack?', 'What does dual stack mean?'), options: [l('Dwa routery', 'Two routers'), l('IPv4 i IPv6 działają jednocześnie', 'IPv4 and IPv6 run at the same time'), l('Dwa adresy MAC', 'Two MAC addresses'), l('Podwójny NAT', 'Double NAT')], answer: 1, explain: l('Urządzenie ma oba stosy protokołów naraz.', 'The device runs both protocol stacks at once.') },
+    { id: 'q44-9', kind: 'single', q: l('Router ma adres 2001:db8:10::1/64, ale komputery nie dostają adresów z SLAAC. Czego najpewniej brakuje?', 'A router has 2001:db8:10::1/64, but computers get no SLAAC addresses. What is most likely missing?'), options: [l('ipv6 unicast-routing', 'ipv6 unicast-routing'), l('Serwera DHCPv4', 'A DHCPv4 server'), l('Trasy domyślnej na komputerach', 'A default route on the computers'), l('Rekordu DNS', 'A DNS record')], answer: 0, explain: l('Bez ipv6 unicast-routing router nie wysyła Router Advertisement, więc komputery nie znają prefiksu.', 'Without ipv6 unicast-routing the router sends no Router Advertisements, so computers do not learn the prefix.') },
+    { id: 'q44-10', kind: 'single', q: l('Następny skok trasy IPv6 to adres fe80::2. Co jeszcze trzeba podać?', 'An IPv6 route next hop is fe80::2. What else must you specify?'), options: [l('Interfejs wyjściowy', 'The exit interface'), l('Maskę w notacji kropkowej', 'A dotted mask'), l('Numer VLAN', 'A VLAN number'), l('Nic więcej', 'Nothing else')], answer: 0, explain: l('Adres link-local jest unikalny tylko na jednym łączu, więc router musi wiedzieć, przez który interfejs wysłać pakiet.', 'A link-local address is unique only on one link, so the router must know which interface to use.') },
   ],
 };

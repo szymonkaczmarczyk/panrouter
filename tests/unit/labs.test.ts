@@ -165,6 +165,15 @@ SOLUTIONS['dhcp-snooping'] = (sim) => {
   }
 };
 
+SOLUTIONS['ipv6-podstawy'] = (sim) => {
+  cli(sim, 'R1', ['ipv6 unicast-routing', 'interface g0/0/0', 'ipv6 address 2001:db8:10::1/64', 'no shutdown', 'interface g0/0/1', 'ipv6 address 2001:db8:20::1/64', 'no shutdown']);
+};
+
+SOLUTIONS['ipv6-trasy'] = (sim) => {
+  cli(sim, 'R1', ['ipv6 route 2001:db8:2::/64 2001:db8:12::2']);
+  cli(sim, 'R2', ['ipv6 route 2001:db8:1::/64 2001:db8:12::1']);
+};
+
 SOLUTIONS.egzamin = (sim) => {
   cli(sim, 'SW1', ['vlan 10', 'vlan 20', 'int g1/0/1', 'switchport access vlan 10', 'int g1/0/2', 'switchport access vlan 20', 'int g1/0/24', 'switchport mode trunk']);
   cli(sim, 'R1', [

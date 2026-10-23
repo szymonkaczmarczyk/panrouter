@@ -2,6 +2,27 @@ import { computed, effect, signal } from '@preact/signals';
 import type { Network } from '../sim/types';
 
 const STORAGE_KEY = 'panrouter:v1';
+export const SAVED_LIMIT = 30;
+
+export interface SavedNet {
+  id: string;
+  name: string;
+  savedAt: string;
+  devices: number;
+  data: string;
+}
+
+export interface IncidentRun {
+  seed: number;
+  level: 1 | 2 | 3;
+  scenario: string;
+  net: Network;
+  tests: { id: string; from: string; kind: 'ping' | 'http'; target: string; label: { pl: string; en: string } }[];
+  faults: { kind: string; layer: 'L1' | 'L2' | 'L3' | 'L7'; device: string; solution: { pl: string; en: string } }[];
+  symptoms: string[];
+  hints: number;
+  revealed: boolean;
+}
 
 export interface Progress {
   version: 1;
@@ -13,6 +34,9 @@ export interface Progress {
   mistakes: string[];
   streak: { days: number; last: string };
   sandbox: Network | null;
+  savedNets: SavedNet[];
+  incident: IncidentRun | null;
+  incidents: { solved: number; clean: number };
   labNets: Record<string, Network>;
   settings: { motion: 'system' | 'reduce'; terminalFont: number; showPorts: boolean; showIps: boolean };
 }
@@ -28,9 +52,42 @@ function blank(): Progress {
     mistakes: [],
     streak: { days: 0, last: '' },
     sandbox: null,
+    savedNets: [],
+    incident: null,
+    incidents: { solved: 0, clean: 0 },
     labNets: {},
     settings: { motion: 'system', terminalFont: 14, showPorts: false, showIps: true },
   };
+}
+
+function cleanSaved(value: unknown): SavedNet[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((n): n is SavedNet => Boolean(n) && typeof n.id === 'string' && typeof n.name === 'string' && typeof n.data === 'string' && typeof n.savedAt === 'string')
+    .map((n) => ({ id: n.id.slice(0, 40), name: n.name.slice(0, 60), savedAt: n.savedAt.slice(0, 40), devices: Number(n.devices) || 0, data: n.data }))
+    .slice(0, SAVED_LIMIT);
+}
+
+function cleanIncident(value: unknown): IncidentRun | null {
+  const run = value as IncidentRun | null;
+  if (!run || typeof run !== 'object') return null;
+  const valid =
+    Number.isInteger(run.seed) &&
+    [1, 2, 3].includes(run.level) &&
+    typeof run.scenario === 'string' &&
+    Array.isArray(run.tests) &&
+    Array.isArray(run.faults) &&
+    Array.isArray(run.symptoms) &&
+    run.tests.every((t) => typeof t?.id === 'string' && typeof t.from === 'string' && typeof t.target === 'string' && (t.kind === 'ping' || t.kind === 'http') && typeof t.label?.pl === 'string') &&
+    run.faults.every((f) => typeof f?.device === 'string' && typeof f.solution?.pl === 'string') &&
+    Boolean(run.net && typeof run.net === 'object');
+  return valid ? { ...run, hints: Math.max(0, Math.min(2, Number(run.hints) || 0)), revealed: Boolean(run.revealed) } : null;
+}
+
+function cleanIncidentStats(value: unknown): Progress['incidents'] {
+  const stats = value as Progress['incidents'] | null;
+  const solved = Math.max(0, Math.floor(Number(stats?.solved) || 0));
+  return { solved, clean: Math.min(solved, Math.max(0, Math.floor(Number(stats?.clean) || 0))) };
 }
 
 function load(): Progress {
@@ -40,7 +97,7 @@ function load(): Progress {
     const parsed = JSON.parse(raw) as Partial<Progress>;
     if (parsed.version !== 1) return blank();
     const base = blank();
-    return { ...base, ...parsed, exam: { ...base.exam, ...parsed.exam }, settings: { ...base.settings, ...parsed.settings }, streak: { ...base.streak, ...parsed.streak } };
+    return { ...base, ...parsed, savedNets: cleanSaved(parsed.savedNets), incident: cleanIncident(parsed.incident), incidents: cleanIncidentStats(parsed.incidents), exam: { ...base.exam, ...parsed.exam }, settings: { ...base.settings, ...parsed.settings }, streak: { ...base.streak, ...parsed.streak } };
   } catch {
     return blank();
   }
@@ -138,6 +195,46 @@ export function saveSandbox(net: Network): void {
   });
 }
 
+export function storeNetwork(entry: SavedNet): void {
+  update((d) => {
+    d.savedNets = [entry, ...d.savedNets.filter((n) => n.id !== entry.id)].slice(0, SAVED_LIMIT);
+  });
+}
+
+export function removeSavedNetwork(id: string): void {
+  update((d) => {
+    d.savedNets = d.savedNets.filter((n) => n.id !== id);
+  });
+}
+
+export function setIncident(run: IncidentRun | null): void {
+  update((d) => {
+    d.incident = run;
+  });
+}
+
+export function saveIncidentNet(net: Network): void {
+  update((d) => {
+    if (d.incident) d.incident.net = net;
+  });
+}
+
+export function takeIncidentHint(reveal: boolean): void {
+  update((d) => {
+    if (!d.incident) return;
+    if (reveal) d.incident.revealed = true;
+    else d.incident.hints = Math.min(2, d.incident.hints + 1);
+  });
+}
+
+export function recordIncidentSolved(clean: boolean): void {
+  update((d) => {
+    d.incidents = { solved: d.incidents.solved + 1, clean: d.incidents.clean + (clean ? 1 : 0) };
+    d.incident = null;
+    touchStreak(d);
+  });
+}
+
 export function saveLabNet(id: string, net: Network | null): void {
   update((d) => {
     if (net) d.labNets[id] = net;
@@ -158,7 +255,7 @@ export function importProgress(text: string): boolean {
     const parsed = JSON.parse(text) as Progress;
     if (parsed.version !== 1 || typeof parsed.sections !== 'object') return false;
     const base = blank();
-    progress.value = { ...base, ...parsed, exam: { ...base.exam, ...parsed.exam }, settings: { ...base.settings, ...parsed.settings } };
+    progress.value = { ...base, ...parsed, savedNets: cleanSaved(parsed.savedNets), incident: cleanIncident(parsed.incident), incidents: cleanIncidentStats(parsed.incidents), exam: { ...base.exam, ...parsed.exam }, settings: { ...base.settings, ...parsed.settings } };
     return true;
   } catch {
     return false;
@@ -185,6 +282,7 @@ export const xp = computed(() => {
   for (const lab of Object.values(p.labs)) total += Math.round(lab.best);
   for (const game of Object.values(p.games)) total += Math.round(Math.min(100, game.best) / 2);
   if (p.exam.passed) total += 300;
+  total += Math.min(600, p.incidents.clean * 40 + (p.incidents.solved - p.incidents.clean) * 15);
   return total;
 });
 

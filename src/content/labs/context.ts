@@ -1,5 +1,6 @@
 import { Simulator } from '../../sim/engine';
 import { inSubnet, parseCidr, parseIp } from '../../sim/ip';
+import { formatIpv6, inSubnet6, parseCidr6, parseIpv6 } from '../../sim/ip6';
 import { portByName } from '../../sim/builder';
 import { connect, findDeviceByName } from '../../sim/network';
 import type { Network } from '../../sim/types';
@@ -44,8 +45,17 @@ export function makeLabContext(net: Network, live: Simulator): LabContext {
     port,
     ping: (from, to) => {
       const a = dev(from);
+      const v6 = parseIpv6(to);
+      if (a && v6 !== null) return sim.canReach6(a.id, v6);
       const ip = target(to);
       return Boolean(a && ip !== null && sim.canReach(a.id, ip));
+    },
+    ipv6In: (name, prefix) => {
+      const d = dev(name);
+      const net = parseCidr6(prefix);
+      if (!d || !net) return null;
+      const found = sim.topo.ip6Ifs(d).flatMap((i) => i.addrs).find((a) => a.origin !== 'link-local' && inSubnet6(a.addr, net.addr, net.prefix));
+      return found ? formatIpv6(found.addr) : null;
     },
     http: (from, url) => {
       const a = dev(from);

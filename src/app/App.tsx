@@ -20,6 +20,8 @@ const DevicesPage = lazyPage(() => import('../pages/Library').then((m) => m.Devi
 const Settings = lazyPage(() => import('../pages/Settings').then((m) => m.Settings));
 const Privacy = lazyPage(() => import('../pages/Legal').then((m) => m.Privacy));
 const Terms = lazyPage(() => import('../pages/Legal').then((m) => m.Terms));
+const IncidentSetup = lazyPage(() => import('../pages/Incident').then((m) => m.IncidentSetup));
+const IncidentRunPage = lazyPage(() => import('../pages/Incident').then((m) => m.IncidentRunPage));
 const NotFound = lazyPage(() => import('../pages/NotFound').then((m) => m.NotFound));
 
 interface RouteDef {
@@ -38,6 +40,8 @@ const ROUTES: RouteDef[] = [
   { pattern: '/laboratoria', page: LabsPage, render: () => <LabsPage /> },
   { pattern: '/lab/:id', wide: true, page: LabPage, render: (p) => <LabPage id={p.id} /> },
   { pattern: '/symulator', wide: true, page: Sandbox, render: () => <Sandbox /> },
+  { pattern: '/awaria', page: IncidentSetup, render: () => <IncidentSetup /> },
+  { pattern: '/awaria/zgloszenie', wide: true, page: IncidentRunPage, render: () => <IncidentRunPage /> },
   { pattern: '/gry', page: GamesPage, render: () => <GamesPage /> },
   { pattern: '/egzamin', page: ExamPage, render: () => <ExamPage /> },
   { pattern: '/gry/:id', page: GamePage, render: (p) => <GamePage id={p.id} /> },

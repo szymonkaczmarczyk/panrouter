@@ -82,6 +82,10 @@ function fhrp(value: unknown): FhrpGroup | null {
   };
 }
 
+function ipv6List(value: unknown): string[] {
+  return list(value, (item) => (typeof item === 'string' && /^[0-9a-fA-F:]{2,39}\/\d{1,3}$/.test(item) ? item.toLowerCase() : null), 16);
+}
+
 function portSecurity(value: unknown): PortSecurity {
   const raw = record(value);
   const base = blankPortSecurity();
@@ -111,6 +115,7 @@ function port(value: unknown): Port | null {
   out.nativeVlan = int(raw.nativeVlan, 1, 1, 4094);
   out.channelGroup = int(raw.channelGroup, 0, 0, 64);
   out.fhrp = fhrp(raw.fhrp);
+  out.ipv6 = ipv6List(raw.ipv6);
   out.portSecurity = portSecurity(raw.portSecurity);
   return out;
 }
@@ -125,6 +130,7 @@ function vif(value: unknown): VirtualIf | null {
   out.prefix = int(raw.prefix, 24, 0, 32);
   out.vlan = int(raw.vlan, 0, 0, 4094);
   out.fhrp = fhrp(raw.fhrp);
+  out.ipv6 = ipv6List(raw.ipv6);
   return out;
 }
 
@@ -197,6 +203,10 @@ function device(value: unknown, scratch: Network): Device | null {
     const r = record(v);
     return r ? { id: int(r.id, 1, 1, 4094), name: str(r.name, 'VLAN', 32) } : null;
   }).filter((v, i, all) => all.findIndex((x) => x.id === v.id) === i);
+  out.routes6 = list(raw.routes6, (v) => {
+    const r = record(v);
+    return r ? { net: str(r.net, '', 39), prefix: int(r.prefix, 64, 0, 128), via: str(r.via, '', 45), iface: str(r.iface, '', 64) } : null;
+  });
   out.routes = list(raw.routes, (v) => {
     const r = record(v);
     return r ? { net: str(r.net, '', 15), prefix: int(r.prefix, 0, 0, 32), via: str(r.via, '', 15), iface: str(r.iface, '', 64), ad: int(r.ad, 1, 1, 255) } : null;

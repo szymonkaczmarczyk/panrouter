@@ -134,3 +134,22 @@ test('laboratorium EtherChannel ocenia konfigurację z CLI', async ({ page, isMo
   await page.getByRole('button', { name: 'Sprawdź wyniki' }).click();
   await expect(page.locator('.lab-results .score-ring strong')).toHaveText('100%');
 });
+
+test('laboratorium IPv6: router z CLI, SLAAC na komputerze i ocena', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'pisanie w terminalu sprawdzamy na desktopie');
+  await fresh(page, '/lab/ipv6-podstawy');
+  await page.locator('[data-device]').filter({ hasText: /^R1/ }).first().click();
+  const cli = page.getByLabel(/CLI R1: wpisz polecenie/);
+  for (const line of ['enable', 'conf t', 'ipv6 unicast-routing', 'int g0/0/0', 'ipv6 address 2001:db8:10::1/64', 'no shut', 'int g0/0/1', 'ipv6 address 2001:db8:20::1/64', 'no shut', 'end', 'show ipv6 interface brief']) {
+    await cli.fill(line);
+    await cli.press('Enter');
+  }
+  await expect(page.locator('.terminal')).toContainText('2001:DB8:10::1');
+  await page.getByRole('button', { name: 'Zamknij panel' }).click();
+  await page.locator('[data-device]').filter({ hasText: /^PC1/ }).first().click();
+  await page.getByRole('button', { name: 'Konfiguracja IP' }).click();
+  await expect(page.locator('.ipv6-list')).toContainText('2001:db8:10:');
+  await expect(page.locator('.ipv6-list')).toContainText('SLAAC');
+  await page.getByRole('button', { name: 'Sprawdź wyniki' }).click();
+  await expect(page.locator('.lab-results .score-ring strong')).toHaveText('100%');
+});

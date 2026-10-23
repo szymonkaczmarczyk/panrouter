@@ -7,11 +7,12 @@
 PanRouter to symulator sieci komputerowych w duchu Cisco Packet Tracer połączony z pełnym kursem. Na planszy
 stawiasz routery, przełączniki, punkty dostępowe Wi-Fi 7, zapory NGFW, serwery i komputery, łączysz je kablem
 miedzianym albo światłowodem i konfigurujesz w CLI lub w panelach. Tryb symulacji zatrzymuje każdy pakiet
-i tłumaczy po polsku, co z nim zrobiło urządzenie: ARP, przełączanie, VLAN-y, routing, NAT, DHCP, DNS i zapora.
+i tłumaczy po polsku, co z nim zrobiło urządzenie: ARP, przełączanie, VLAN-y, routing, NAT, DHCP, DNS, zapora i IPv6.
+Ruch można też obejrzeć w analizatorze pakietów w stylu Wiresharka i zapisać do pliku `.pcap`.
 Sieć można wysłać komuś jednym linkiem, zapisać jako obraz PNG, a całą aplikację zainstalować i używać bez internetu.
 
 Wokół symulatora jest ścieżka nauki: 20 modułów na pięciu poziomach (od laika do eksperta), quizy z wyjaśnieniami,
-21 laboratoriów z automatyczną oceną, 10 minigier i egzamin końcowy z częścią praktyczną. Całość działa po polsku,
+23 laboratoria z automatyczną oceną, generator losowych awarii, 10 minigier i egzamin końcowy z częścią praktyczną. Całość działa po polsku,
 a jednym przyciskiem przełącza się na angielski. Sprzęt i technologie są aktualne na 2026 rok.
 
 ![Pulpit PanRouter z hasłem kursu, przyciskiem startu i ilustracją sieci](docs/screenshots/01-pulpit.png)
@@ -70,12 +71,13 @@ Każde laboratorium ma w testach jednostkowych skrypt rozwiązania, który udowa
 | `#/` | Pulpit: postęp, ranga, seria dni nauki, poziomy i skróty do ćwiczeń |
 | `#/nauka` | Ścieżka nauki: 5 poziomów, 20 modułów, laboratoria przy każdym poziomie |
 | `#/nauka/:modul` | Lekcja w rozdziałach z diagramami, przykładami CLI i quizem na końcu |
-| `#/laboratoria`, `#/lab/:id` | 21 zadań w symulatorze z instrukcją, podpowiedziami i oceną |
-| `#/symulator` | Własna sieć od zera albo z jednego z 4 szablonów, plik, link do sieci i obraz PNG |
+| `#/laboratoria`, `#/lab/:id` | 23 zadania w symulatorze z instrukcją, podpowiedziami i oceną |
+| `#/awaria` | Generator awarii: losowe usterki w gotowej sieci, zgłoszenia od użytkowników, podpowiedzi i ocena naprawy |
+| `#/symulator` | Własna sieć od zera albo z jednego z 4 szablonów, zapisane sieci, plik, link do sieci i obraz PNG |
 | `#/gry`, `#/gry/:id` | 10 minigier: binarnie, podsieci, porty, OSI, tablica MAC, routing, IPv6, diagnostyka, CLI na czas |
 | `#/quizy`, `#/quiz/:id` | Quizy modułów, szybki miks i powtórka błędów |
 | `#/egzamin` | Egzamin końcowy: 30 pytań w 45 minut i sieć do skonfigurowania |
-| `#/slownik` | 82 pojęcia z wyszukiwarką |
+| `#/slownik` | 84 pojęcia z wyszukiwarką |
 | `#/urzadzenia` | Sprzęt 2026 i lista technologii, których już się nie używa |
 | `#/ustawienia` | Język, ograniczenie animacji, terminal, instalacja aplikacji, kopia zapasowa postępu |
 
@@ -88,7 +90,8 @@ Każde laboratorium ma w testach jednostkowych skrypt rozwiązania, który udowa
 - CLI: tryby, skróty poleceń, pomoc pod `?`, dopełnianie klawiszem Tab, komunikaty błędów jak na sprzęcie,
   `show running-config`, `show ip route`, `show vlan brief`, `show spanning-tree`, `show ip ospf neighbor`,
   `show ip nat translations`, `show etherchannel summary`, `show vrrp brief`, `show standby brief`,
-  `show port-security`, `show ip dhcp snooping binding` i inne.
+  `show port-security`, `show ip dhcp snooping binding`, `show ipv6 interface brief`, `show ipv6 route`,
+  `show ipv6 neighbors` i inne.
 - Wiersz poleceń komputerów po polsku lub angielsku: `ipconfig`, `ping`, `tracert`, `nslookup`, `arp -a`,
   `curl`, `ssh`, `telnet`.
 - Panele graficzne, które wykonują prawdziwe polecenia CLI i pokazują je pod formularzem.
@@ -100,6 +103,20 @@ Każde laboratorium ma w testach jednostkowych skrypt rozwiązania, który udowa
 - Link do sieci: topologia zapisana w adresie strony (kompresja deflate), bez serwera. Odbiorca potwierdza
   zastąpienie swojej sieci, a uszkodzony lub spreparowany link jest odrzucany.
 - Eksport planszy do PNG w podwójnej rozdzielczości, z osadzonymi fontami projektu.
+- IPv6: adresy statyczne i EUI-64, adresy link-local, SLAAC na komputerach, odkrywanie sąsiadów (NDP), trasy
+  statyczne, ping i traceroute po IPv6 w CLI routera i w wierszu poleceń komputera.
+- Analizator pakietów jak w Wiresharku: tabela z kolumnami No., czas, źródło, cel, protokół, długość i info, filtr
+  wyświetlania (`ip.addr == 10.10.10.1 and icmp`, `ipv6`, `tcp.port == 80`, `dropped`), warstwy, zrzut bajtów
+  i eksport do `.pcap`, który otwiera prawdziwy Wireshark.
+- Praca na planszy: cofanie i ponawianie (Ctrl+Z, Ctrl+Shift+Z), zaznaczanie wielu urządzeń ramką z Shift
+  i przesuwanie ich razem, notatki na planszy oraz do 30 zapisanych sieci pod własnymi nazwami.
+
+**Generator awarii**
+
+Symulator psuje jedną z czterech gotowych sieci (1, 2 albo 3 usterki zależnie od trudności) i pokazuje objawy
+zgłaszane przez użytkowników. Usterki obejmują 15 rodzajów, od wyłączonego portu i złego VLAN-u po brakujące trasy,
+listy ACL, pule DHCP i rekordy DNS. Naprawa jest oceniana po działaniu sieci, a nie po cofnięciu konkretnej zmiany,
+więc liczy się każde poprawne rozwiązanie. Ten sam numer zgłoszenia zawsze daje tę samą awarię.
 
 **Aplikacja**
 
@@ -162,8 +179,8 @@ npm run dev             # http://127.0.0.1:4400
 | `npm run dev` | Serwer deweloperski Vite na porcie 4400 |
 | `npm run build` | Sprawdzenie typów TypeScript i build do `dist/` |
 | `npm run preview` | Podgląd builda na porcie 4401 |
-| `npm test` | 84 testy jednostkowe (silnik, CLI, laboratoria, link do sieci, treści) |
-| `npm run test:e2e` | 42 testy Playwright z kontrolą dostępności axe, także tryb offline na buildzie |
+| `npm test` | 111 testów jednostkowych (silnik, IPv6, CLI, laboratoria, generator awarii, analizator, treści) |
+| `npm run test:e2e` | 56 testów Playwright z kontrolą dostępności axe, także tryb offline na buildzie |
 | `node scripts/assets.mjs` | Ponowne wygenerowanie favicony, ikon aplikacji i obrazu Open Graph |
 
 Projekt nie ma backendu, bazy danych ani zmiennych środowiskowych. Postęp zapisuje się w `localStorage`

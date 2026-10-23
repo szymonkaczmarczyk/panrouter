@@ -6,6 +6,7 @@ import { toast } from '../../../ui/toast';
 import { modelOf } from '../../catalog';
 import { hostExecute, hostPrompt } from '../../cli/host';
 import { ipToStr, prefixToMask } from '../../ip';
+import { formatIpv6, isLinkLocal, parseCidr6, parseIpv6 } from '../../ip6';
 import type { Device, Port } from '../../types';
 import type { SimController } from '../controller';
 import { gatewayError, hostAddressError, ipError, parsePrefix, prefixError } from '../forms';
@@ -146,6 +147,71 @@ function AdapterForm({ ctrl, device, port }: { ctrl: SimController; device: Devi
   );
 }
 
+type Ipv6Mode = 'auto' | 'static' | 'off';
+
+function Ipv6Form({ ctrl, device, port }: { ctrl: SimController; device: Device; port: Port }) {
+  const initial: Ipv6Mode = port.ipv6.length ? 'static' : port.ipv6Slaac ? 'auto' : 'off';
+  const [mode, setMode] = useState<Ipv6Mode>(initial);
+  const [address, setAddress] = useState(port.ipv6[0] ?? '');
+  const [gateway, setGateway] = useState(port.gateway6);
+  const [touched, setTouched] = useState(false);
+  const parsed = parseCidr6(address);
+  const errors = {
+    address: mode !== 'static' ? null : !address.trim() ? tx('Wpisz adres z prefiksem, np. 2001:db8:1::10/64.', 'Enter an address with a prefix, e.g. 2001:db8:1::10/64.') : !parsed ? tx('To nie jest poprawny adres IPv6 z prefiksem. Przykład: 2001:db8:1::10/64.', 'This is not a valid IPv6 address with a prefix. Example: 2001:db8:1::10/64.') : isLinkLocal(parsed.addr) ? tx('Adres fe80:: powstaje sam. Wpisz adres globalny, np. 2001:db8:1::10/64.', 'The fe80:: address is created automatically. Enter a global address, e.g. 2001:db8:1::10/64.') : null,
+    gateway: mode !== 'static' || !gateway.trim() ? null : parseIpv6(gateway) === null ? tx('Brama musi być adresem IPv6, np. 2001:db8:1::1 albo fe80::1.', 'The gateway must be an IPv6 address, e.g. 2001:db8:1::1 or fe80::1.') : null,
+  };
+  const live = ctrl.sim.topo.ip6If(device, port.name);
+  const save = (event: Event) => {
+    event.preventDefault();
+    setTouched(true);
+    if (errors.address || errors.gateway) return;
+    port.ipv6Slaac = mode === 'auto';
+    port.ipv6 = mode === 'static' && parsed ? [`${formatIpv6(parsed.addr)}/${parsed.prefix}`] : [];
+    port.gateway6 = mode === 'static' ? gateway.trim().toLowerCase() : '';
+    ctrl.changed();
+    toast(mode === 'off' ? tx('IPv6 wyłączone na tej karcie.', 'IPv6 disabled on this adapter.') : tx('Zapisano ustawienia IPv6.', 'IPv6 settings saved.'), 'ok');
+  };
+  return (
+    <form class="stack" onSubmit={save} noValidate>
+      <h4 class="ipv6-title">IPv6</h4>
+      <div class="segmented" role="radiogroup" aria-label={tx('Konfiguracja IPv6', 'IPv6 configuration')}>
+        {(
+          [
+            ['auto', 'Automatycznie (SLAAC)', 'Automatic (SLAAC)'],
+            ['static', 'Statycznie', 'Static'],
+            ['off', 'Wyłączone', 'Off'],
+          ] as [Ipv6Mode, string, string][]
+        ).map(([id, pl, en]) => (
+          <button key={id} type="button" role="radio" aria-checked={mode === id} aria-pressed={mode === id} onClick={() => setMode(id)}>
+            {tx(pl, en)}
+          </button>
+        ))}
+      </div>
+      {mode === 'static' && (
+        <div class="form-grid">
+          <Field id={`ip6-${port.name}`} label={tx('Adres IPv6 z prefiksem', 'IPv6 address with prefix')} value={address} onInput={setAddress} error={touched ? errors.address : null} placeholder="2001:db8:1::10/64" mono />
+          <Field id={`gw6-${port.name}`} label={tx('Brama IPv6 (opcjonalnie)', 'IPv6 gateway (optional)')} value={gateway} onInput={setGateway} error={touched ? errors.gateway : null} help={tx('Puste pole: brama z ogłoszenia routera (RA).', 'Empty: gateway from the router advertisement (RA).')} placeholder="2001:db8:1::1" mono />
+        </div>
+      )}
+      {mode === 'auto' && <p class="small muted">{tx('Komputer sam zbuduje adres z prefiksu ogłaszanego przez router i swojego adresu MAC (EUI-64). Router musi mieć ipv6 unicast-routing i adres /64 na interfejsie.', 'The computer builds its address from the router-advertised prefix and its MAC (EUI-64). The router needs ipv6 unicast-routing and a /64 address on the interface.')}</p>}
+      {live && (
+        <ul class="mono small ipv6-list">
+          {live.addrs.map((a) => (
+            <li key={String(a.addr)}>
+              {formatIpv6(a.addr)}/{a.prefix} <span class="dim">({a.origin === 'link-local' ? 'link-local' : a.origin === 'slaac' ? 'SLAAC' : tx('statyczny', 'static')})</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div class="row-wrap">
+        <button type="submit" class="btn btn-primary">
+          {tx('Zapisz IPv6', 'Save IPv6')}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function IpConfigApp({ ctrl, device }: { ctrl: SimController; device: Device }) {
   const ports = device.ports;
   const [active, setActive] = useState(ports[0].name);
@@ -162,6 +228,7 @@ function IpConfigApp({ ctrl, device }: { ctrl: SimController; device: Device }) 
         </div>
       )}
       <AdapterForm key={`${device.id}-${port.name}`} ctrl={ctrl} device={device} port={port} />
+      <Ipv6Form key={`v6-${device.id}-${port.name}`} ctrl={ctrl} device={device} port={port} />
     </div>
   );
 }

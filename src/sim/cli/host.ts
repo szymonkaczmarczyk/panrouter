@@ -1,6 +1,7 @@
 import type { Lang } from '../../i18n/l10n';
 import type { EchoResult, Simulator } from '../engine';
 import { formatMacWindows, ipToStr, parseIp, prefixToMask } from '../ip';
+import { formatIpv6, isLinkLocal, parseIpv6 } from '../ip6';
 import type { Device, Port } from '../types';
 import { cliExecute, cliPrompt, newSession, type CliSession } from './ios';
 import { fakeHash } from './show';
@@ -83,6 +84,13 @@ function ipconfig(sim: Simulator, device: Device, lang: Lang, all: boolean): str
       out.push(`${dots(label)}${port.ip}`);
       out.push(`${dots(t(lang, { pl: 'Maska podsieci', en: 'Subnet Mask' }))}${ipToStr(prefixToMask(port.prefix))}`);
     }
+    const v6 = sim.topo.ip6If(device, port.name);
+    for (const a of v6?.addrs ?? []) {
+      const label = a.origin === 'link-local' ? t(lang, { pl: 'Adres IPv6 połączenia lokalnego', en: 'Link-local IPv6 Address' }) : t(lang, { pl: 'Adres IPv6', en: 'IPv6 Address' });
+      out.push(`${dots(label)}${formatIpv6(a.addr)}${a.origin === 'link-local' ? `%${port.name}` : ''}`);
+    }
+    const route6 = sim.topo.routes6(device).find((r) => r.prefix === 0 && r.ifName === port.name);
+    if (route6?.via != null) out.push(`${dots(t(lang, { pl: 'Brama domyślna IPv6', en: 'IPv6 Default Gateway' }))}${formatIpv6(route6.via)}${isLinkLocal(route6.via) ? `%${port.name}` : ''}`);
     out.push(`${dots(t(lang, { pl: 'Brama domyślna', en: 'Default Gateway' }))}${port.gateway}`);
     if (all) {
       if (port.dhcp && port.ip && !port.ip.startsWith('169.254.')) {
@@ -142,6 +150,8 @@ function ping(sim: Simulator, device: Device, args: string[], lang: Lang): strin
   const nIndex = args.indexOf('-n');
   if (nIndex >= 0) count = Math.min(20, Math.max(1, Number(args[nIndex + 1]) || 4));
   if (!targetText) return [t(lang, { pl: 'Użycie: ping [-n liczba] cel', en: 'Usage: ping [-n count] target' })];
+  const v6 = parseIpv6(targetText);
+  if (v6 !== null) return ping6(sim, device, v6, count, lang);
   const target = resolveTarget(sim, device, targetText, lang, out, { pl: 'Żądanie ping', en: 'Ping request' });
   if (target === null) return out;
   const label = parseIp(targetText) === null ? `${targetText} [${ipToStr(target)}]` : targetText;
@@ -180,8 +190,49 @@ function ping(sim: Simulator, device: Device, args: string[], lang: Lang): strin
   return out;
 }
 
+function ping6(sim: Simulator, device: Device, target: bigint, count: number, lang: Lang): string[] {
+  const label = formatIpv6(target);
+  const out = ['', t(lang, { pl: `Badanie ${label} z 32 bajtami danych:`, en: `Pinging ${label} with 32 bytes of data:` })];
+  let received = 0;
+  for (let i = 0; i < count; i++) {
+    const result = sim.echo6(device.id, target);
+    const from = result.from !== null ? formatIpv6(result.from) : label;
+    if (result.outcome === 'reply') {
+      received++;
+      out.push(t(lang, { pl: `Odpowiedź z ${from}: czas${result.rtt < 1 ? '<1' : `=${Math.round(result.rtt)}`} ms`, en: `Reply from ${from}: time${result.rtt < 1 ? '<1' : `=${Math.round(result.rtt)}`}ms` }));
+    } else if (result.outcome === 'no-route' || result.outcome === 'no-ip') {
+      out.push(t(lang, { pl: 'Badanie ping nie powiodło się. Błąd ogólny.', en: 'PING: transmit failed. General failure.' }));
+      return out;
+    } else if (result.outcome === 'timeout') out.push(t(lang, { pl: 'Upłynął limit czasu żądania.', en: 'Request timed out.' }));
+    else {
+      received++;
+      out.push(t(lang, { pl: `Odpowiedź z ${from}: Sieć docelowa jest nieosiągalna.`, en: `Reply from ${from}: Destination net unreachable.` }));
+    }
+  }
+  const lost = count - received;
+  out.push('', t(lang, { pl: `Statystyka badania ping dla ${label}:`, en: `Ping statistics for ${label}:` }), t(lang, { pl: `    Pakiety: Wysłane = ${count}, Odebrane = ${received}, Utracone = ${lost} (${Math.round((lost / count) * 100)}% straty),`, en: `    Packets: Sent = ${count}, Received = ${received}, Lost = ${lost} (${Math.round((lost / count) * 100)}% loss),` }));
+  return out;
+}
+
+function tracert6(sim: Simulator, device: Device, target: bigint, lang: Lang): string[] {
+  const label = formatIpv6(target);
+  const out = ['', t(lang, { pl: `Śledzenie trasy do ${label} przez maksymalnie 30 przeskoków`, en: `Tracing route to ${label} over a maximum of 30 hops` }), ''];
+  sim.traceroute6(device.id, target).forEach((hop, index) => {
+    const n = String(index + 1).padStart(3);
+    if (hop.outcome === 'no-route' || hop.outcome === 'no-ip') return void out.push(t(lang, { pl: 'Błąd ogólny.', en: 'General failure.' }));
+    if (hop.from === null) return void out.push(`${n}     *        *        *     ${t(lang, { pl: 'Upłynął limit czasu żądania.', en: 'Request timed out.' })}`);
+    const cell = (hop.rtt < 1 ? '<1 ms' : `${Math.round(hop.rtt)} ms`).padStart(6);
+    const suffix = hop.outcome === 'net-unreachable' || hop.outcome === 'host-unreachable' ? t(lang, { pl: ' zgłasza: Sieć docelowa jest nieosiągalna.', en: ' reports: Destination net unreachable.' }) : '';
+    out.push(`${n}  ${cell}   ${cell}   ${cell}  ${formatIpv6(hop.from)}${suffix}`);
+  });
+  out.push('', t(lang, { pl: 'Śledzenie zakończone.', en: 'Trace complete.' }));
+  return out;
+}
+
 function tracert(sim: Simulator, device: Device, targetText: string | undefined, lang: Lang): string[] {
   if (!targetText) return [t(lang, { pl: 'Użycie: tracert cel', en: 'Usage: tracert target' })];
+  const v6 = parseIpv6(targetText);
+  if (v6 !== null) return tracert6(sim, device, v6, lang);
   const out: string[] = [];
   const target = resolveTarget(sim, device, targetText, lang, out, { pl: 'Polecenie tracert', en: 'Tracert' });
   if (target === null) return out;
@@ -254,12 +305,13 @@ function curl(sim: Simulator, device: Device, url: string | undefined, lang: Lan
   return ['<!doctype html>', `<html><head><title>${result.title}</title></head>`, `<body><h1>${result.title}</h1><p>${result.body}</p></body></html>`];
 }
 
-function ipAddr(device: Device): string[] {
+function ipAddr(sim: Simulator, device: Device): string[] {
   const out = ['1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536', '    inet 127.0.0.1/8 scope host lo'];
   device.ports.forEach((port, index) => {
     out.push(`${index + 2}: ${port.name}: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500`);
     out.push(`    link/ether ${port.mac.match(/.{2}/g)!.join(':')} brd ff:ff:ff:ff:ff:ff`);
     if (port.ip) out.push(`    inet ${port.ip}/${port.prefix} scope global ${port.dhcp ? 'dynamic ' : ''}${port.name}`);
+    for (const a of sim.topo.ip6If(device, port.name)?.addrs ?? []) out.push(`    inet6 ${formatIpv6(a.addr)}/${a.prefix} scope ${a.origin === 'link-local' ? 'link' : `global${a.origin === 'slaac' ? ' dynamic' : ''}`}`);
   });
   return out;
 }
@@ -396,7 +448,7 @@ export function hostExecute(sim: Simulator, session: HostSession, input: string,
       return { lines: [], changed: false, clear: true, secret: false };
     case 'ip': {
       const sub = (args[0] ?? '').toLowerCase();
-      if (sub.startsWith('a')) return done(ipAddr(device));
+      if (sub.startsWith('a')) return done(ipAddr(sim, device));
       if (sub.startsWith('r')) return done(ipRoute(sim, device));
       return done(['Usage: ip [ addr | route ]']);
     }

@@ -37,6 +37,17 @@ export interface L3Config {
   aclOut: string;
   ospfCost: number;
   fhrp: FhrpGroup | null;
+  ipv6: string[];
+  ipv6Enable: boolean;
+  ipv6Slaac: boolean;
+  gateway6: string;
+}
+
+export interface StaticRoute6 {
+  net: string;
+  prefix: number;
+  via: string;
+  iface: string;
 }
 
 export type ViolationMode = 'shutdown' | 'restrict' | 'protect';
@@ -197,7 +208,9 @@ export interface Device {
   vifs: VirtualIf[];
   vlans: { id: number; name: string }[];
   ipRouting: boolean;
+  ipv6Routing: boolean;
   routes: StaticRoute[];
+  routes6: StaticRoute6[];
   defaultGateway: string;
   dhcpPools: DhcpPool[];
   dhcpExcluded: { from: string; to: string }[];
@@ -331,6 +344,25 @@ export interface Ipv4Packet {
   tcp?: TcpSeg;
 }
 
+export type Icmp6Type = 'echo-request' | 'echo-reply' | 'ns' | 'na' | 'unreachable' | 'time-exceeded';
+
+export interface Icmp6Msg {
+  type: Icmp6Type;
+  code: number;
+  id: number;
+  seq: number;
+  target: bigint;
+  mac: string;
+  original?: { src: bigint; dst: bigint; id: number; seq: number };
+}
+
+export interface Ipv6Packet {
+  src: bigint;
+  dst: bigint;
+  hop: number;
+  icmp6: Icmp6Msg;
+}
+
 export interface ArpMsg {
   op: 'request' | 'reply';
   senderMac: string;
@@ -343,12 +375,13 @@ export interface Frame {
   src: string;
   dst: string;
   vlan: number | null;
-  type: 'arp' | 'ipv4';
+  type: 'arp' | 'ipv4' | 'ipv6';
   arp?: ArpMsg;
   ip?: Ipv4Packet;
+  ip6?: Ipv6Packet;
 }
 
-export type Protocol = 'ARP' | 'ICMP' | 'DHCP' | 'DNS' | 'TCP' | 'HTTP' | 'HTTPS' | 'UDP';
+export type Protocol = 'ARP' | 'ICMP' | 'DHCP' | 'DNS' | 'TCP' | 'HTTP' | 'HTTPS' | 'UDP' | 'ICMPv6' | 'NDP';
 
 export interface TraceEvent {
   seq: number;

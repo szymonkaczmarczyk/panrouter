@@ -1,4 +1,4 @@
-import { Cable, Copy, Download, FolderOpen, Hand, ImageDown, LayoutTemplate, Link2, Mail, Maximize, MousePointer2, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-preact';
+import { Cable, Copy, Download, FolderOpen, Hand, ImageDown, LayoutTemplate, Library, Link2, Mail, Maximize, MousePointer2, Redo2, StickyNote, Trash2, Undo2, Upload, ZoomIn, ZoomOut } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { tr, tx } from '../../i18n';
@@ -13,17 +13,16 @@ import { Canvas, stepTimes, type View } from './Canvas';
 import type { CableChoice, SimController, Tool } from './controller';
 import { DevicePanel } from './DevicePanel';
 import { renderNetworkPng } from './exportImage';
+import { NetworkLibrary } from './NetworkLibrary';
 import { EventPanel } from './EventPanel';
 import { Palette } from './Palette';
 
 export function fitView(net: Network, width: number, height: number): View {
-  if (!net.devices.length) return { x: -60, y: -40, zoom: 1 };
-  const xs = net.devices.map((d) => d.x);
-  const ys = net.devices.map((d) => d.y);
-  const minX = Math.min(...xs) - 90;
-  const maxX = Math.max(...xs) + 90;
-  const minY = Math.min(...ys) - 80;
-  const maxY = Math.max(...ys) + 110;
+  if (!net.devices.length && !net.notes.length) return { x: -60, y: -40, zoom: 1 };
+  const minX = Math.min(...net.devices.map((d) => d.x - 90), ...net.notes.map((n) => n.x - 20));
+  const maxX = Math.max(...net.devices.map((d) => d.x + 90), ...net.notes.map((n) => n.x + 210));
+  const minY = Math.min(...net.devices.map((d) => d.y - 80), ...net.notes.map((n) => n.y - 20));
+  const maxY = Math.max(...net.devices.map((d) => d.y + 110), ...net.notes.map((n) => n.y + 170));
   const zoom = Math.min(1.4, Math.max(0.4, Math.min(width / (maxX - minX), height / (maxY - minY))));
   return { zoom, x: (minX + maxX) / 2 - width / zoom / 2, y: (minY + maxY) / 2 - height / zoom / 2 };
 }
@@ -31,6 +30,7 @@ export function fitView(net: Network, width: number, height: number): View {
 const TOOLS: { id: Tool; key: string; icon: typeof Hand; label: [string, string] }[] = [
   { id: 'select', key: 'V', icon: MousePointer2, label: ['Wybierz i przesuń', 'Select and move'] },
   { id: 'connect', key: 'C', icon: Cable, label: ['Połącz kablem', 'Connect cable'] },
+  { id: 'note', key: 'N', icon: StickyNote, label: ['Notatka', 'Note'] },
   { id: 'pdu', key: 'P', icon: Mail, label: ['Pakiet testowy', 'Test packet'] },
   { id: 'delete', key: 'D', icon: Trash2, label: ['Usuń', 'Delete'] },
 ];
@@ -48,6 +48,9 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
   const [view, setView] = useState<View>({ x: -60, y: -40, zoom: 1 });
   const [menu, setMenu] = useState(false);
   const [shareLink, setShareLink] = useState<string | null>(null);
+  const [editingNote, setEditingNote] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [library, setLibrary] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const mode = ctrl.mode.value;
   const tool = ctrl.tool.value;
@@ -81,10 +84,27 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
-      if (target.closest('input, textarea, select, [contenteditable]')) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (target.closest('input, textarea, select, [contenteditable], dialog')) return;
       const key = event.key.toLowerCase();
+      if ((event.metaKey || event.ctrlKey) && !event.altKey) {
+        if (key === 'z' || key === 'y') {
+          event.preventDefault();
+          const redo = key === 'y' || event.shiftKey;
+          if (!(redo ? ctrl.redo() : ctrl.undo())) toast(redo ? tx('Nie ma czego ponowić.', 'Nothing to redo.') : tx('Nie ma czego cofnąć.', 'Nothing to undo.'), 'info', 1800);
+        }
+        if (key === 'a' && ctrl.net.devices.length) {
+          event.preventDefault();
+          ctrl.multi.value = ctrl.net.devices.map((d) => d.id);
+          ctrl.selected.value = null;
+        }
+        return;
+      }
+      if (event.altKey) return;
       if (key === 'escape') {
+        if (ctrl.multi.value.length) {
+          ctrl.multi.value = [];
+          return;
+        }
         if (ctrl.placing.value || ctrl.connectFrom.value || ctrl.pduFrom.value) {
           ctrl.placing.value = null;
           ctrl.connectFrom.value = null;
@@ -109,9 +129,10 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
         fit();
         return;
       }
-      if ((key === 'delete' || key === 'backspace') && ctrl.selected.value && !locked) {
+      if ((key === 'delete' || key === 'backspace') && !locked && (ctrl.multi.value.length || ctrl.selected.value)) {
         event.preventDefault();
-        ctrl.deleteDevice(ctrl.selected.value);
+        if (ctrl.multi.value.length) ctrl.deleteDevices(ctrl.multi.value);
+        else ctrl.deleteDevice(ctrl.selected.value!);
         return;
       }
       if (ctrl.mode.value === 'simulation') {
@@ -215,7 +236,22 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
     window.setTimeout(fit, 30);
   };
 
+  const editNote = (id: string) => {
+    setNoteDraft(ctrl.net.notes.find((n) => n.id === id)?.text ?? '');
+    setEditingNote(id);
+  };
+
+  const closeNote = (save: boolean) => {
+    if (!editingNote) return;
+    const original = ctrl.net.notes.find((n) => n.id === editingNote)?.text ?? '';
+    ctrl.setNoteText(editingNote, save ? noteDraft : original);
+    setEditingNote(null);
+  };
+
+  const selectedCount = ctrl.multi.value.length;
   const hint = (() => {
+    if (selectedCount) return tx(`Zaznaczono: ${selectedCount}. Przeciągnij jedno z nich, żeby przesunąć wszystkie. Delete usuwa, Esc odznacza.`, `Selected: ${selectedCount}. Drag one to move them all. Delete removes, Esc clears.`);
+    if (tool === 'note') return tx('Kliknij na planszy, żeby dodać notatkę.', 'Click the canvas to add a note.');
     if (ctrl.placing.value) return tx(`Kliknij na planszy, żeby postawić: ${tr(modelOf(ctrl.placing.value).title)}. Esc anuluje.`, `Click the canvas to place: ${tr(modelOf(ctrl.placing.value).title)}. Esc cancels.`);
     if (tool === 'connect') return ctrl.connectFrom.value ? tx('Teraz kliknij drugie urządzenie.', 'Now click the second device.') : tx('Kliknij pierwsze urządzenie, które chcesz połączyć.', 'Click the first device you want to connect.');
     if (tool === 'pdu') return ctrl.pduFrom.value ? tx('Kliknij odbiorcę pakietu.', 'Click the packet receiver.') : tx('Kliknij nadawcę pakietu testowego (ping).', 'Click the test packet sender (ping).');
@@ -255,6 +291,14 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
             ))}
           </div>
         )}
+        <div class="segmented history" role="group" aria-label={tx('Historia zmian', 'Change history')}>
+          <button type="button" onClick={() => ctrl.undo()} disabled={!ctrl.canUndo.value} aria-label={tx('Cofnij (Ctrl+Z)', 'Undo (Ctrl+Z)')} title={tx('Cofnij (Ctrl+Z)', 'Undo (Ctrl+Z)')}>
+            <Undo2 aria-hidden="true" />
+          </button>
+          <button type="button" onClick={() => ctrl.redo()} disabled={!ctrl.canRedo.value} aria-label={tx('Ponów (Ctrl+Shift+Z)', 'Redo (Ctrl+Shift+Z)')} title={tx('Ponów (Ctrl+Shift+Z)', 'Redo (Ctrl+Shift+Z)')}>
+            <Redo2 aria-hidden="true" />
+          </button>
+        </div>
         <div class="spacer" />
         <div class="segmented zoom" role="group" aria-label={tx('Powiększenie', 'Zoom')}>
           <button type="button" onClick={() => setView({ ...view, zoom: Math.max(0.35, view.zoom / 1.2) })} aria-label={tx('Oddal', 'Zoom out')}>
@@ -294,6 +338,17 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
                   <Upload aria-hidden="true" />
                   <span>{tx('Wczytaj sieć z pliku', 'Load network from file')}</span>
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    setLibrary(true);
+                  }}
+                >
+                  <Library aria-hidden="true" />
+                  <span>{tx('Moje sieci', 'My networks')}</span>
+                </button>
                 <div class="menu-sep" />
                 <button type="button" role="menuitem" onClick={() => void copyShareLink()}>
                   <Link2 aria-hidden="true" />
@@ -320,7 +375,7 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
       <div class="ws-body">
         {side}
         <div class="ws-canvas" ref={canvasRef}>
-          <Canvas ctrl={ctrl} view={view} onView={setView} readOnlyDevices={locked} />
+          <Canvas ctrl={ctrl} view={view} onView={setView} readOnlyDevices={locked} onEditNote={editNote} />
           {hint && (
             <div class="canvas-hint" role="status">
               {hint}
@@ -345,11 +400,57 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
           )}
           {!locked && <Palette ctrl={ctrl} />}
           {locked && (
-            <div class="palette palette-locked small muted">{tx('W tym laboratorium używasz tylko urządzeń z planszy.', 'In this lab you only use the devices on the canvas.')}</div>
+            <div class="palette palette-locked small muted">{tx('Tu pracujesz tylko na urządzeniach z planszy. Nowych nie dodajesz.', 'Here you only work with the devices on the canvas. You do not add new ones.')}</div>
           )}
         </div>
         {ctrl.panel.value ? <DevicePanel ctrl={ctrl} locked={locked} /> : mode === 'simulation' ? <EventPanel ctrl={ctrl} /> : null}
       </div>
+      {editingNote && (
+        <Dialog
+          title={tx('Notatka na planszy', 'Canvas note')}
+          onClose={() => closeNote(false)}
+          actions={
+            <>
+              <button
+                type="button"
+                class="btn btn-danger"
+                onClick={() => {
+                  ctrl.deleteNote(editingNote);
+                  setEditingNote(null);
+                }}
+              >
+                <Trash2 aria-hidden="true" />
+                {tx('Usuń notatkę', 'Delete note')}
+              </button>
+              <button type="button" class="btn btn-primary" onClick={() => closeNote(true)}>
+                {tx('Zapisz notatkę', 'Save note')}
+              </button>
+            </>
+          }
+        >
+          <div class="field">
+            <label for="note-text">{tx('Treść (do 500 znaków)', 'Text (up to 500 characters)')}</label>
+            <textarea
+              id="note-text"
+              class="input"
+              rows={5}
+              maxLength={500}
+              value={noteDraft}
+              data-autofocus
+              onInput={(event) => setNoteDraft((event.currentTarget as HTMLTextAreaElement).value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault();
+                  closeNote(true);
+                }
+              }}
+              placeholder={tx('Np. VLAN 10 to biuro, VLAN 20 to goście', 'E.g. VLAN 10 is the office, VLAN 20 is guests')}
+            />
+          </div>
+          <p class="small dim">{tx('Ctrl+Enter zapisuje. Notatki trafiają też do pliku, linku i obrazu PNG.', 'Ctrl+Enter saves. Notes are included in the file, link and PNG image.')}</p>
+        </Dialog>
+      )}
+      {library && <NetworkLibrary ctrl={ctrl} onClose={() => setLibrary(false)} onOpened={() => window.setTimeout(fit, 30)} />}
       {shareLink && (
         <Dialog
           title={tx('Link do sieci', 'Network link')}

@@ -1,4 +1,4 @@
-import { CircleCheck, Clock, FlaskConical } from 'lucide-preact';
+import { ArrowRight, CircleCheck, Clock, FlaskConical, Siren } from 'lucide-preact';
 import { useEffect } from 'preact/hooks';
 import { setMeta } from '../app/meta';
 import { href } from '../app/router';
@@ -16,6 +16,17 @@ export function LabsPage() {
         <h2>{tx('Sprawdź się w praktyce', 'Prove it in practice')}</h2>
         <p>{tx('Każde laboratorium to gotowa topologia i konkretne zadania. Przycisk „Sprawdź wyniki” sam oceni, czy sieć działa tak, jak trzeba.', 'Each lab is a ready topology with concrete tasks. The "Check results" button grades whether the network works as required.')}</p>
       </header>
+      <a class="card card-link incident-promo" href={href('/awaria')}>
+        <Siren aria-hidden="true" class="bento-icon" />
+        <span class="stack" style={{ gap: 'var(--space-1)' }}>
+          <strong>{tx('Generator awarii', 'Fault generator')}</strong>
+          <span class="muted small">{tx('Losowa usterka w gotowej sieci, zgłoszenia od użytkowników i ocena naprawy. Za każdym razem inne zadanie.', 'A random fault in a ready network, user tickets and a graded fix. A different task every time.')}</span>
+        </span>
+        <span class="btn btn-sm">
+          {tx('Zacznij dyżur', 'Start a shift')}
+          <ArrowRight aria-hidden="true" />
+        </span>
+      </a>
       {LEVELS.map((level) => {
         const labs = labsOfLevel(level.id);
         if (!labs.length) return null;

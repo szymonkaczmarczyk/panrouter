@@ -7,11 +7,12 @@
 PanRouter is a network simulator in the spirit of Cisco Packet Tracer combined with a full course. On the canvas you
 place routers, switches, Wi-Fi 7 access points, NGFW firewalls, servers and computers, connect them with copper or
 fiber and configure them in the CLI or in panels. Simulation mode pauses every packet and explains what the device
-did with it: ARP, switching, VLANs, routing, NAT, DHCP, DNS and the firewall. You can send a network to someone with
+did with it: ARP, switching, VLANs, routing, NAT, DHCP, DNS, the firewall and IPv6. Traffic can also be inspected in a
+Wireshark-style packet analyzer and saved to a `.pcap` file. You can send a network to someone with
 one link, save it as a PNG image, and install the whole app and use it without internet.
 
 Around the simulator there is a learning path: 20 modules on five levels (from beginner to expert), quizzes with
-explanations, 21 auto-graded labs, 10 minigames and a final exam with a practical part. Everything works in Polish,
+explanations, 23 auto-graded labs, a random fault generator, 10 minigames and a final exam with a practical part. Everything works in Polish,
 and one button switches it to English. Hardware and technologies are up to date for 2026.
 
 ![PanRouter dashboard with the course tagline, a start button and a network illustration](docs/screenshots/01-pulpit.png)
@@ -69,12 +70,13 @@ solution script in the unit tests that proves it can be passed.
 | `#/` | Dashboard: progress, rank, learning streak, levels and shortcuts to exercises |
 | `#/nauka` | Learning path: 5 levels, 20 modules, labs at every level |
 | `#/nauka/:modul` | A lesson in chapters with diagrams, CLI examples and a quiz at the end |
-| `#/laboratoria`, `#/lab/:id` | 21 tasks in the simulator with instructions, hints and grading |
-| `#/symulator` | Your own network from scratch or from one of 4 templates, file, network link and PNG image |
+| `#/laboratoria`, `#/lab/:id` | 23 tasks in the simulator with instructions, hints and grading |
+| `#/awaria` | Fault generator: random faults in a ready network, user tickets, hints and a graded fix |
+| `#/symulator` | Your own network from scratch or from one of 4 templates, saved networks, file, network link and PNG image |
 | `#/gry`, `#/gry/:id` | 10 minigames: binary, subnets, ports, OSI, MAC table, routing, IPv6, troubleshooting, timed CLI |
 | `#/quizy`, `#/quiz/:id` | Module quizzes, a quick mix and a mistakes review |
 | `#/egzamin` | Final exam: 30 questions in 45 minutes and a network to configure |
-| `#/slownik` | 82 terms with search |
+| `#/slownik` | 84 terms with search |
 | `#/urzadzenia` | 2026 hardware and a list of technologies that are no longer used |
 | `#/ustawienia` | Language, reduced motion, terminal, app install, progress backup |
 
@@ -86,7 +88,8 @@ solution script in the unit tests that proves it can be passed.
 - CLI: modes, command abbreviations, `?` help, Tab completion, error messages like on real hardware,
   `show running-config`, `show ip route`, `show vlan brief`, `show spanning-tree`, `show ip ospf neighbor`,
   `show ip nat translations`, `show etherchannel summary`, `show vrrp brief`, `show standby brief`,
-  `show port-security`, `show ip dhcp snooping binding` and more.
+  `show port-security`, `show ip dhcp snooping binding`, `show ipv6 interface brief`, `show ipv6 route`,
+  `show ipv6 neighbors` and more.
 - Computer command line in Polish or English: `ipconfig`, `ping`, `tracert`, `nslookup`, `arp -a`, `curl`, `ssh`,
   `telnet`.
 - Graphical panels that run real CLI commands and show them under the form.
@@ -98,6 +101,20 @@ solution script in the unit tests that proves it can be passed.
 - Network link: the topology stored in the page URL (deflate compression), no server. The recipient confirms replacing
   their network, and a broken or tampered link is rejected.
 - Canvas export to PNG at double resolution, with the project fonts embedded.
+- IPv6: static and EUI-64 addresses, link-local addresses, SLAAC on computers, neighbor discovery (NDP), static routes,
+  IPv6 ping and traceroute in the router CLI and the computer command line.
+- Wireshark-style packet analyzer: a table with No., time, source, destination, protocol, length and info, a display
+  filter (`ip.addr == 10.10.10.1 and icmp`, `ipv6`, `tcp.port == 80`, `dropped`), layers, a byte dump and `.pcap`
+  export that real Wireshark opens.
+- Canvas work: undo and redo (Ctrl+Z, Ctrl+Shift+Z), selecting several devices with a Shift box and moving them
+  together, notes on the canvas and up to 30 saved networks under your own names.
+
+**Fault generator**
+
+The simulator breaks one of four ready networks (1, 2 or 3 faults depending on difficulty) and shows the symptoms users
+report. Faults cover 15 kinds, from a shut port and a wrong VLAN to missing routes, ACLs, DHCP pools and DNS records.
+The fix is graded by how the network works, not by undoing a specific change, so any correct solution counts. The same
+ticket number always gives the same fault.
 
 **App**
 
@@ -161,8 +178,8 @@ npm run dev             # http://127.0.0.1:4400
 | `npm run dev` | Vite dev server on port 4400 |
 | `npm run build` | TypeScript type check and build to `dist/` |
 | `npm run preview` | Build preview on port 4401 |
-| `npm test` | 84 unit tests (engine, CLI, labs, network link, content) |
-| `npm run test:e2e` | 42 Playwright tests with axe accessibility checks, including offline mode on the build |
+| `npm test` | 111 unit tests (engine, IPv6, CLI, labs, fault generator, analyzer, content) |
+| `npm run test:e2e` | 56 Playwright tests with axe accessibility checks, including offline mode on the build |
 | `node scripts/assets.mjs` | Regenerates the favicon, app icons and Open Graph image |
 
 The project has no backend, database or environment variables. Progress is stored in the browser's `localStorage`,

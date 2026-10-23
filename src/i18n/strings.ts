@@ -17,6 +17,7 @@ export const STRINGS = {
   'nav.games': l('Minigry', 'Mini-games'),
   'nav.gamesShort': l('Gry', 'Games'),
   'nav.quizzes': l('Quizy', 'Quizzes'),
+  'nav.incidents': l('Generator awarii', 'Fault generator'),
   'nav.exam': l('Egzamin końcowy', 'Final exam'),
   'nav.glossary': l('Słownik', 'Glossary'),
   'nav.devices': l('Sprzęt 2026', 'Gear 2026'),

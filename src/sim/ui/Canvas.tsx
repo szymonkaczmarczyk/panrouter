@@ -27,6 +27,8 @@ export const PROTO_COLOR: Record<string, string> = {
   HTTP: 'var(--proto-http)',
   HTTPS: 'var(--proto-https)',
   UDP: 'var(--proto-udp)',
+  ICMPv6: 'var(--proto-icmp)',
+  NDP: 'var(--proto-arp)',
 };
 
 function primaryIp(ctrl: SimController, device: Device): string {
@@ -70,15 +72,44 @@ export function stepTimes(events: TraceEvent[], filters: Set<string>): number[] 
 }
 
 interface Drag {
+  kind: 'device' | 'note';
   id: string;
-  dx: number;
-  dy: number;
+  origin: { x: number; y: number };
+  start: Map<string, { x: number; y: number }>;
   startX: number;
   startY: number;
   moved: boolean;
 }
 
-export function Canvas({ ctrl, view, onView, readOnlyDevices }: { ctrl: SimController; view: View; onView: (v: View) => void; readOnlyDevices?: boolean }) {
+interface Marquee {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+const NOTE_WIDTH = 190;
+const NOTE_CHARS = 28;
+const NOTE_LINE = 16;
+
+export function wrapNote(text: string): string[] {
+  const lines: string[] = [];
+  for (const paragraph of text.split('\n')) {
+    let line = '';
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      const next = line ? `${line} ${word}` : word;
+      if (next.length > NOTE_CHARS && line) {
+        lines.push(line);
+        line = word.slice(0, NOTE_CHARS * 2);
+      } else line = next.slice(0, NOTE_CHARS * 2);
+    }
+    lines.push(line);
+  }
+  if (lines.length <= 8) return lines;
+  return [...lines.slice(0, 7), `${lines[7].slice(0, NOTE_CHARS - 1)}…`];
+}
+
+export function Canvas({ ctrl, view, onView, readOnlyDevices, onEditNote }: { ctrl: SimController; view: View; onView: (v: View) => void; readOnlyDevices?: boolean; onEditNote?: (id: string) => void }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const drag = useRef<Drag | null>(null);
@@ -91,6 +122,7 @@ export function Canvas({ ctrl, view, onView, readOnlyDevices }: { ctrl: SimContr
   const settings = progress.value.settings;
   const stepEvents = useStepEvents(ctrl);
   const [anim, setAnim] = useState(1);
+  const [marquee, setMarquee] = useState<Marquee | null>(null);
 
   useLayoutEffect(() => {
     const el = svgRef.current?.parentElement;
@@ -207,15 +239,48 @@ export function Canvas({ ctrl, view, onView, readOnlyDevices }: { ctrl: SimContr
     }
     const deviceEl = target.closest('[data-device]');
     const linkEl = target.closest('[data-link]');
+    const noteEl = target.closest('[data-note]');
     picker.value = null;
+    const tool = ctrl.tool.value;
+    if (noteEl) {
+      const id = noteEl.getAttribute('data-note')!;
+      if (tool === 'delete') return ctrl.deleteNote(id);
+      const note = ctrl.net.notes.find((n) => n.id === id);
+      if (!note) return;
+      drag.current = { kind: 'note', id, origin: toWorld(event.clientX, event.clientY), start: new Map([[id, { x: note.x, y: note.y }]]), startX: event.clientX, startY: event.clientY, moved: false };
+      (event.currentTarget as Element).setPointerCapture(event.pointerId);
+      return;
+    }
     if (deviceEl) {
       const id = deviceEl.getAttribute('data-device')!;
       const device = byId.get(id)!;
-      if (ctrl.tool.value === 'select') {
-        const p = toWorld(event.clientX, event.clientY);
-        drag.current = { id, dx: p.x - device.x, dy: p.y - device.y, startX: event.clientX, startY: event.clientY, moved: false };
+      if (tool === 'select') {
+        if (event.shiftKey) {
+          const current = ctrl.multi.value.length ? ctrl.multi.value : ctrl.selected.value ? [ctrl.selected.value] : [];
+          ctrl.multi.value = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+          ctrl.selected.value = null;
+          return;
+        }
+        const group = ctrl.multi.value.includes(id) ? ctrl.multi.value : [id];
+        if (group.length === 1) ctrl.multi.value = [];
+        const start = new Map(group.map((gid) => [gid, { x: byId.get(gid)!.x, y: byId.get(gid)!.y }]));
+        drag.current = { kind: 'device', id, origin: toWorld(event.clientX, event.clientY), start, startX: event.clientX, startY: event.clientY, moved: false };
         (event.currentTarget as Element).setPointerCapture(event.pointerId);
       } else handleDevice(device, event.clientX, event.clientY);
+      return;
+    }
+    if (tool === 'note') {
+      if (readOnlyDevices) return toast(tx('W tym laboratorium nie dodajesz notatek.', 'You cannot add notes in this lab.'), 'warn');
+      const p = toWorld(event.clientX, event.clientY);
+      const id = ctrl.addNote(p.x - NOTE_WIDTH / 2, p.y - 20);
+      ctrl.tool.value = 'select';
+      onEditNote?.(id);
+      return;
+    }
+    if (event.shiftKey && tool === 'select') {
+      const p = toWorld(event.clientX, event.clientY);
+      setMarquee({ x1: p.x, y1: p.y, x2: p.x, y2: p.y });
+      (event.currentTarget as Element).setPointerCapture(event.pointerId);
       return;
     }
     if (linkEl && ctrl.tool.value === 'delete') {
@@ -225,6 +290,7 @@ export function Canvas({ ctrl, view, onView, readOnlyDevices }: { ctrl: SimContr
       return;
     }
     ctrl.selected.value = null;
+    ctrl.multi.value = [];
     pan.current = { x: event.clientX, y: event.clientY, vx: view.x, vy: view.y };
     (event.currentTarget as Element).setPointerCapture(event.pointerId);
   };
@@ -241,12 +307,30 @@ export function Canvas({ ctrl, view, onView, readOnlyDevices }: { ctrl: SimContr
       onView({ zoom, x: before.x - (mid.x - rect.left) / zoom, y: before.y - (mid.y - rect.top) / zoom });
       return;
     }
+    if (marquee) {
+      const p = toWorld(event.clientX, event.clientY);
+      setMarquee({ ...marquee, x2: p.x, y2: p.y });
+      return;
+    }
     const d = drag.current;
     if (d) {
       if (!d.moved && Math.hypot(event.clientX - d.startX, event.clientY - d.startY) < 5) return;
       d.moved = true;
       const p = toWorld(event.clientX, event.clientY);
-      ctrl.moveDevice(d.id, p.x - d.dx, p.y - d.dy, false);
+      const dx = p.x - d.origin.x;
+      const dy = p.y - d.origin.y;
+      if (d.kind === 'note') {
+        const origin = d.start.get(d.id)!;
+        ctrl.moveNote(d.id, origin.x + dx, origin.y + dy, false);
+        return;
+      }
+      for (const [id, origin] of d.start) {
+        const device = byId.get(id);
+        if (!device) continue;
+        device.x = origin.x + dx;
+        device.y = origin.y + dy;
+      }
+      ctrl.bump();
       return;
     }
     const p = pan.current;
@@ -256,13 +340,29 @@ export function Canvas({ ctrl, view, onView, readOnlyDevices }: { ctrl: SimContr
   const onPointerUp = (event: PointerEvent) => {
     pointers.current.delete(event.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
+    if (marquee) {
+      const left = Math.min(marquee.x1, marquee.x2);
+      const right = Math.max(marquee.x1, marquee.x2);
+      const top = Math.min(marquee.y1, marquee.y2);
+      const bottom = Math.max(marquee.y1, marquee.y2);
+      const inside = devices.filter((dev) => dev.x >= left && dev.x <= right && dev.y >= top && dev.y <= bottom).map((dev) => dev.id);
+      ctrl.multi.value = [...new Set([...ctrl.multi.value, ...inside])];
+      ctrl.selected.value = null;
+      setMarquee(null);
+      return;
+    }
     const d = drag.current;
     drag.current = null;
     pan.current = null;
     if (!d) return;
-    const device = byId.get(d.id);
-    if (!device) return;
-    if (d.moved) ctrl.moveDevice(d.id, device.x, device.y, true);
+    if (d.kind === 'note') {
+      const note = ctrl.net.notes.find((n) => n.id === d.id);
+      if (!note) return;
+      if (d.moved) ctrl.moveNote(d.id, note.x, note.y, true);
+      else onEditNote?.(d.id);
+      return;
+    }
+    if (d.moved) ctrl.moveDevices([...d.start.keys()], 0, 0, true);
     else {
       ctrl.selected.value = d.id;
       ctrl.panel.value = { dev: d.id, tab: 'default' };
@@ -412,6 +512,24 @@ export function Canvas({ ctrl, view, onView, readOnlyDevices }: { ctrl: SimContr
           );
         })}
         {ctrl.net.links.map(renderLink)}
+        {ctrl.net.notes.map((note) => {
+          const lines = wrapNote(note.text || tx('Nowa notatka', 'New note'));
+          return (
+            <g key={note.id} data-note={note.id} transform={`translate(${note.x} ${note.y})`} class={`note ${note.text ? '' : 'note-empty'}`} tabIndex={0} role="button" aria-label={tx(`Notatka: ${note.text}`, `Note: ${note.text}`)} onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onEditNote?.(note.id);
+              }
+            }}>
+              <rect width={NOTE_WIDTH} height={lines.length * NOTE_LINE + 20} rx="8" class="note-card" />
+              {lines.map((line, index) => (
+                <text key={index} x="12" y={22 + index * NOTE_LINE} class="note-text">
+                  {line}
+                </text>
+              ))}
+            </g>
+          );
+        })}
         {devices.map((device) => {
           const powered = topo.isPowered(device);
           const ip = settings.showIps ? primaryIp(ctrl, device) : '';
@@ -421,7 +539,7 @@ export function Canvas({ ctrl, view, onView, readOnlyDevices }: { ctrl: SimContr
               key={device.id}
               data-device={device.id}
               transform={`translate(${device.x} ${device.y})`}
-              class={`node ${selectedId === device.id ? 'node-selected' : ''} ${isSource ? 'node-source' : ''} ${powered ? '' : 'node-off'}`}
+              class={`node ${selectedId === device.id || ctrl.multi.value.includes(device.id) ? 'node-selected' : ''} ${isSource ? 'node-source' : ''} ${powered ? '' : 'node-off'}`}
               style={{ color: categoryColor(device.kind) }}
               tabIndex={0}
               role="button"
@@ -458,6 +576,15 @@ export function Canvas({ ctrl, view, onView, readOnlyDevices }: { ctrl: SimContr
           );
         })}
         {packets}
+        {marquee && (
+          <rect
+            x={Math.min(marquee.x1, marquee.x2)}
+            y={Math.min(marquee.y1, marquee.y2)}
+            width={Math.abs(marquee.x2 - marquee.x1)}
+            height={Math.abs(marquee.y2 - marquee.y1)}
+            class="marquee"
+          />
+        )}
       </svg>
       {pickerState && (
         <PortPicker

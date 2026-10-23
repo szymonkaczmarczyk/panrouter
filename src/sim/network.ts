@@ -1,5 +1,5 @@
 import { modelOf, portGroupName } from './catalog';
-import type { CableType, Device, DeviceKind, Link, LinkEnd, Network, Port, PortSecurity, VirtualIf } from './types';
+import type { CableType, Device, DeviceKind, Link, LinkEnd, Network, Note, Port, PortSecurity, VirtualIf } from './types';
 
 export const INTERNET_DNS = '198.51.100.53';
 export const INTERNET_WEB = '198.51.100.80';
@@ -61,6 +61,10 @@ export function blankPort(name: string, short: string, mac: string): Port {
     aclOut: '',
     ospfCost: 0,
     fhrp: null,
+    ipv6: [],
+    ipv6Enable: false,
+    ipv6Slaac: false,
+    gateway6: '',
     portSecurity: blankPortSecurity(),
     errDisabled: false,
     dhcpTrust: false,
@@ -89,6 +93,10 @@ export function blankVif(kind: VirtualIf['kind'], name: string, parent = '', vla
     aclOut: '',
     ospfCost: 0,
     fhrp: null,
+    ipv6: [],
+    ipv6Enable: false,
+    ipv6Slaac: false,
+    gateway6: '',
   };
 }
 
@@ -124,7 +132,9 @@ export function createDevice(net: Network, kind: DeviceKind, x: number, y: numbe
     vifs: [],
     vlans: [],
     ipRouting: spec.routing,
+    ipv6Routing: false,
     routes: [],
+    routes6: [],
     defaultGateway: '',
     dhcpPools: [],
     dhcpExcluded: [],
@@ -233,7 +243,10 @@ function applyDefaults(device: Device): void {
     case 'printer':
     case 'camera':
     case 'voip':
-      for (const port of device.ports) port.dhcp = true;
+      for (const port of device.ports) {
+        port.dhcp = true;
+        port.ipv6Slaac = true;
+      }
       break;
     case 'server':
       device.web = { title: device.name, body: '' };
@@ -311,6 +324,12 @@ export function autoConnect(net: Network, devA: Device, devB: Device): Link | Co
 
 export function removeLink(net: Network, id: string): void {
   net.links = net.links.filter((link) => link.id !== id);
+}
+
+export function createNote(net: Network, x: number, y: number, text: string): Note {
+  const note: Note = { id: `n${nextSeq(net)}`, x: Math.round(x), y: Math.round(y), text };
+  net.notes.push(note);
+  return note;
 }
 
 export function removeDevice(net: Network, id: string): void {

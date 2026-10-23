@@ -51,11 +51,13 @@ async function fontFaces(): Promise<string> {
 }
 
 function bounds(net: Network): { x: number; y: number; w: number; h: number } {
-  const xs = net.devices.map((d) => d.x);
-  const ys = net.devices.map((d) => d.y);
-  const x = Math.min(...xs) - 110;
-  const y = Math.min(...ys) - 80;
-  return { x, y, w: Math.max(...xs) + 110 - x, h: Math.max(...ys) + 120 - y };
+  const left = [...net.devices.map((d) => d.x - 110), ...net.notes.map((n) => n.x - 20)];
+  const right = [...net.devices.map((d) => d.x + 110), ...net.notes.map((n) => n.x + 210)];
+  const top = [...net.devices.map((d) => d.y - 80), ...net.notes.map((n) => n.y - 20)];
+  const bottom = [...net.devices.map((d) => d.y + 120), ...net.notes.map((n) => n.y + 170)];
+  const x = Math.min(...left);
+  const y = Math.min(...top);
+  return { x, y, w: Math.max(...right) - x, h: Math.max(...bottom) - y };
 }
 
 function inlineStyles(source: SVGSVGElement, target: SVGSVGElement): void {

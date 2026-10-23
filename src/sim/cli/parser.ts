@@ -1,11 +1,12 @@
 import type { L10n } from '../../i18n/l10n';
 import { parseIp } from '../ip';
+import { parseCidr6, parseIpv6 } from '../ip6';
 import type { Device, DeviceKind } from '../types';
 import { expandRange, resolveIface } from './iface';
 
 export type Mode = 'user' | 'priv' | 'config' | 'if' | 'if-range' | 'subif' | 'vlan' | 'router' | 'dhcp' | 'std-acl' | 'ext-acl' | 'line';
 
-export type ParamType = 'ip' | 'mask' | 'wild' | 'num' | 'word' | 'iface' | 'ifnew' | 'line' | 'vlans' | 'ifrange';
+export type ParamType = 'ip' | 'ip6' | 'ip6p' | 'mask' | 'wild' | 'num' | 'word' | 'iface' | 'ifnew' | 'line' | 'vlans' | 'ifrange';
 
 export interface ParamSpec {
   type: ParamType;
@@ -79,6 +80,10 @@ function matchParam(spec: ParamSpec, tokens: string[], index: number, device: De
   switch (spec.type) {
     case 'ip':
       return parseIp(token) !== null ? { value: token, consumed: 1 } : null;
+    case 'ip6':
+      return parseIpv6(token) !== null ? { value: token.toLowerCase(), consumed: 1 } : null;
+    case 'ip6p':
+      return parseCidr6(token) !== null ? { value: token.toLowerCase(), consumed: 1 } : null;
     case 'mask':
       if (parseIp(token) === null) return null;
       return { value: token, consumed: 1 };
@@ -154,6 +159,8 @@ export interface HelpEntry {
 
 const PARAM_LABEL: Record<ParamType, string> = {
   ip: 'A.B.C.D',
+  ip6: 'X:X:X:X::X',
+  ip6p: 'X:X:X:X::X/<0-128>',
   mask: 'A.B.C.D',
   wild: 'A.B.C.D',
   num: '<n>',

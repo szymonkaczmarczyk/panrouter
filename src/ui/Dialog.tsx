@@ -8,19 +8,21 @@ interface Props {
   onClose: () => void;
   children: ComponentChildren;
   actions?: ComponentChildren;
+  wide?: boolean;
 }
 
-export function Dialog({ title, onClose, children, actions }: Props) {
+export function Dialog({ title, onClose, children, actions, wide }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
     if (dialog && !dialog.open) dialog.showModal();
+    dialog?.querySelector<HTMLElement>('[data-autofocus]')?.focus();
     return () => dialog?.close();
   }, []);
   return (
     <dialog
       ref={ref}
-      class="dialog"
+      class={`dialog ${wide ? 'dialog-wide' : ''}`}
       aria-labelledby="dialog-title"
       onCancel={(event) => {
         event.preventDefault();

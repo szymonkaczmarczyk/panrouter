@@ -93,6 +93,7 @@ export interface LabContext {
   inSubnet: (ip: string, cidr: string) => boolean;
   sim: import('../sim/engine').Simulator;
   fork: () => LabContext;
+  ipv6In: (name: string, prefix: string) => string | null;
   unplug: (name: string, port: string) => void;
   plug: (a: string, aPort: string, b: string, bPort: string) => void;
 }

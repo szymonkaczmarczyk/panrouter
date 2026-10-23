@@ -15,6 +15,7 @@ import {
   PanelLeftOpen,
   Router,
   Settings,
+  Siren,
   X,
 } from 'lucide-preact';
 import { lang, t } from '../i18n';
@@ -39,6 +40,7 @@ const LEARN: NavItem[] = [
 ];
 
 const PRACTICE: NavItem[] = [
+  { to: '/awaria', label: 'nav.incidents', icon: Siren },
   { to: '/gry', label: 'nav.games', icon: Gamepad2 },
   { to: '/quizy', label: 'nav.quizzes', icon: ListChecks },
   { to: '/egzamin', label: 'nav.exam', icon: Award },
@@ -57,6 +59,7 @@ function isActive(to: string, current: string): boolean {
   if (to === '/gry') return current.startsWith('/gry');
   if (to === '/quizy') return current.startsWith('/quiz');
   if (to === '/egzamin') return current.startsWith('/egzamin');
+  if (to === '/awaria') return current.startsWith('/awaria');
   return current === to;
 }
 

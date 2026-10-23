@@ -1,27 +1,29 @@
-import { CircleCheck, CircleX, Pause, Play, RotateCcw, SkipBack, SkipForward, X } from 'lucide-preact';
-import { useEffect } from 'preact/hooks';
+import { CircleCheck, CircleX, Pause, Play, RotateCcw, ScanSearch, SkipBack, SkipForward, X } from 'lucide-preact';
+import { useEffect, useState } from 'preact/hooks';
 import { lang, tx } from '../../i18n';
 import { explain } from '../explain';
 import { formatMacColon, ipToStr } from '../ip';
+import { formatIpv6 } from '../ip6';
 import type { Frame, TraceEvent } from '../types';
 import { PROTO_COLOR, stepTimes } from './Canvas';
 import type { SimController } from './controller';
+import { PacketAnalyzer } from './PacketAnalyzer';
 
-const PROTOCOLS = ['ARP', 'ICMP', 'DHCP', 'DNS', 'TCP', 'HTTP', 'HTTPS'];
+const PROTOCOLS = ['ARP', 'ICMP', 'DHCP', 'DNS', 'TCP', 'HTTP', 'HTTPS', 'ICMPv6', 'NDP'];
 
 function macText(mac: string): string {
   if (mac === 'ffffffffffff') return `ff:ff:ff:ff:ff:ff (${tx('rozgłoszenie', 'broadcast')})`;
   return /^[0-9a-f]{12}$/.test(mac) ? formatMacColon(mac) : mac || '-';
 }
 
-function Layers({ frame }: { frame: Frame }) {
+export function Layers({ frame }: { frame: Frame }) {
   const rows: { layer: string; title: string; fields: [string, string][] }[] = [];
   const l2: [string, string][] = [
     [tx('MAC docelowy', 'Destination MAC'), macText(frame.dst)],
     [tx('MAC źródłowy', 'Source MAC'), macText(frame.src)],
   ];
   if (frame.vlan !== null) l2.push(['802.1Q VLAN', String(frame.vlan)]);
-  l2.push(['EtherType', frame.type === 'arp' ? '0x0806 (ARP)' : '0x0800 (IPv4)']);
+  l2.push(['EtherType', frame.type === 'arp' ? '0x0806 (ARP)' : frame.type === 'ipv6' ? '0x86DD (IPv6)' : '0x0800 (IPv4)']);
   if (frame.src) rows.push({ layer: 'L2', title: 'Ethernet II', fields: l2 });
   if (frame.arp) {
     const a = frame.arp;
@@ -35,6 +37,32 @@ function Layers({ frame }: { frame: Frame }) {
         [tx('Szukany MAC', 'Target MAC'), a.op === 'request' ? tx('nieznany (00:00:00:00:00:00)', 'unknown (00:00:00:00:00:00)') : macText(a.targetMac)],
       ],
     });
+  }
+  const ip6 = frame.ip6;
+  if (ip6) {
+    rows.push({
+      layer: 'L3',
+      title: 'IPv6',
+      fields: [
+        [tx('Adres źródłowy', 'Source address'), formatIpv6(ip6.src)],
+        [tx('Adres docelowy', 'Destination address'), formatIpv6(ip6.dst)],
+        ['Hop limit', String(ip6.hop)],
+        ['Next header', '58 (ICMPv6)'],
+      ],
+    });
+    const i = ip6.icmp6;
+    const names: Record<string, string> = {
+      'echo-request': tx('żądanie echa (128)', 'echo request (128)'),
+      'echo-reply': tx('odpowiedź echa (129)', 'echo reply (129)'),
+      ns: 'Neighbor Solicitation (135)',
+      na: 'Neighbor Advertisement (136)',
+      unreachable: tx('cel nieosiągalny (1)', 'destination unreachable (1)'),
+      'time-exceeded': tx('czas przekroczony (3)', 'time exceeded (3)'),
+    };
+    const fields: [string, string][] = [[tx('Typ', 'Type'), names[i.type]]];
+    if (i.type === 'ns' || i.type === 'na') fields.push([tx('Szukany adres', 'Target address'), formatIpv6(i.target)], [tx('Adres MAC w opcji', 'MAC in option'), macText(i.mac)]);
+    else if (i.type === 'echo-request' || i.type === 'echo-reply') fields.push(['ID / seq', `${i.id} / ${i.seq}`]);
+    rows.push({ layer: 'L3', title: i.type === 'ns' || i.type === 'na' ? 'ICMPv6 (NDP)' : 'ICMPv6', fields });
   }
   const ip = frame.ip;
   if (ip) {
@@ -143,6 +171,7 @@ export function EventPanel({ ctrl }: { ctrl: SimController }) {
   const name = (id: string) => ctrl.net.devices.find((d) => d.id === id)?.name ?? id;
   const currentTime = times[step];
   const selected = ctrl.selectedEvent.value !== null ? events[ctrl.selectedEvent.value] : null;
+  const [analyzer, setAnalyzer] = useState(false);
 
   useEffect(() => {
     if (!playing) return;
@@ -153,6 +182,17 @@ export function EventPanel({ ctrl }: { ctrl: SimController }) {
     const timer = window.setTimeout(() => (ctrl.step.value = step + 1), 950 / ctrl.speed.value);
     return () => window.clearTimeout(timer);
   }, [playing, step, times.length, ctrl.speed.value]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'a' || event.metaKey || event.ctrlKey || event.altKey) return;
+      if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable], dialog')) return;
+      event.preventDefault();
+      setAnalyzer(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     const row = document.querySelector('.event-row[aria-current="step"]');
@@ -199,6 +239,9 @@ export function EventPanel({ ctrl }: { ctrl: SimController }) {
         </button>
         <button type="button" class="btn btn-icon btn-ghost" onClick={() => ctrl.clearEvents()} aria-label={tx('Wyczyść zdarzenia', 'Clear events')} title={tx('Wyczyść zdarzenia', 'Clear events')}>
           <RotateCcw aria-hidden="true" />
+        </button>
+        <button type="button" class="btn btn-icon btn-ghost" onClick={() => setAnalyzer(true)} aria-label={tx('Analizator pakietów (jak Wireshark)', 'Packet analyzer (Wireshark-style)')} title={tx('Analizator pakietów (A)', 'Packet analyzer (A)')}>
+          <ScanSearch aria-hidden="true" />
         </button>
         <label class="speed">
           <span class="dim small">{tx('Tempo', 'Speed')}</span>
@@ -250,6 +293,7 @@ export function EventPanel({ ctrl }: { ctrl: SimController }) {
           ))}
         </ol>
       )}
+      {analyzer && <PacketAnalyzer ctrl={ctrl} onClose={() => setAnalyzer(false)} />}
     </section>
   );
 }

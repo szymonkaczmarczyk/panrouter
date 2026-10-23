@@ -1,5 +1,6 @@
 import { aclPermitsSource, aclVerdict } from './acl';
 import { BROADCAST_IP, BROADCAST_MAC, broadcastOf, inSubnet, ipToStr, networkOf, parseIp, prefixToMask } from './ip';
+import { ALL_NODES, formatIpv6, isLinkLocal, isMulticast6, isMulticastMac, multicastMac, solicitedNode } from './ip6';
 import { INTERNET_HOSTS, isHost } from './network';
 import { Topology, type L3If } from './topology';
 import type {
@@ -8,8 +9,10 @@ import type {
   Explain,
   Frame,
   HttpMsg,
+  Icmp6Msg,
   IcmpMsg,
   Ipv4Packet,
+  Ipv6Packet,
   LinkEnd,
   Network,
   Port,
@@ -43,7 +46,9 @@ type InboxItem =
   | { kind: 'dns'; id: number; answer: number; ok: boolean; time: number }
   | { kind: 'http'; port: number; msg: HttpMsg; time: number }
   | { kind: 'rst'; port: number; time: number }
-  | { kind: 'synack'; port: number; time: number };
+  | { kind: 'synack'; port: number; time: number }
+  | { kind: 'icmp6'; msg: Icmp6Msg; from: bigint; hop: number; time: number }
+  | { kind: 'nd-fail'; pkt: Ipv6Packet; time: number };
 
 interface DevState {
   arp: Map<number, { mac: string; ifName: string }>;
@@ -60,6 +65,15 @@ interface DevState {
   secure: Map<string, string[]>;
   violations: Map<string, { count: number; last: string }>;
   snooping: Map<string, SnoopBinding>;
+  nd: Map<bigint, { mac: string; ifName: string }>;
+  pending6: { ifName: string; nextHop: bigint; pkt: Ipv6Packet }[];
+}
+
+export interface Echo6Result {
+  outcome: EchoOutcome;
+  from: bigint | null;
+  hop: number;
+  rtt: number;
 }
 
 export interface SnoopBinding {
@@ -108,6 +122,7 @@ const WAN_LATENCY = 6;
 
 export function protocolOf(frame: Frame): Protocol {
   if (frame.type === 'arp') return 'ARP';
+  if (frame.type === 'ipv6') return frame.ip6?.icmp6.type === 'ns' || frame.ip6?.icmp6.type === 'na' ? 'NDP' : 'ICMPv6';
   const ip = frame.ip!;
   if (ip.proto === 'icmp') return 'ICMP';
   if (ip.proto === 'udp') {
@@ -161,6 +176,8 @@ export class Simulator {
       st.nat = [];
       st.sessions.clear();
       st.secure.clear();
+      st.nd.clear();
+      st.pending6 = [];
     }
   }
 
@@ -188,6 +205,8 @@ export class Simulator {
         secure: new Map(),
         violations: new Map(),
         snooping: new Map(),
+        nd: new Map(),
+        pending6: [],
       };
       this.state.set(device.id, st);
     }
@@ -324,9 +343,11 @@ export class Simulator {
     }
     for (const device of this.net.devices) {
       const st = this.state.get(device.id);
-      if (!st || !st.pending.length) continue;
+      if (!st) continue;
       for (const item of st.pending) st.inbox.push({ kind: 'arp-fail', pkt: item.pkt, time: this.time });
+      for (const item of st.pending6) st.inbox.push({ kind: 'nd-fail', pkt: item.pkt, time: this.time });
       st.pending = [];
+      st.pending6 = [];
     }
   }
 
@@ -441,7 +462,7 @@ export class Simulator {
       return this.drop('l2.noSvi', { vlan });
     }
     this.l2Forward(device, vlan, frame, port.name);
-    if (frame.dst === BROADCAST_MAC) {
+    if (frame.dst === BROADCAST_MAC || isMulticastMac(frame.dst)) {
       if (!svi) return;
       const outcome = this.current?.outcome;
       this.l3Receive(device, svi, local);
@@ -457,9 +478,9 @@ export class Simulator {
     const st = this.st(device);
     const ports = this.topo.forwardingPorts(device, vlan);
     const send = (out: Port) => this.transmit(device, out.name, { ...frame, vlan: this.topo.egressTag(out, vlan) });
-    if (frame.dst === BROADCAST_MAC) {
+    if (frame.dst === BROADCAST_MAC || isMulticastMac(frame.dst)) {
       const targets = ports.filter((p) => p.name !== ingress);
-      this.note(targets.length ? 'l2.floodBroadcast' : 'l2.noPorts', { vlan, count: targets.length });
+      this.note(targets.length ? (frame.dst === BROADCAST_MAC ? 'l2.floodBroadcast' : 'l2.floodMulticast') : 'l2.noPorts', { vlan, count: targets.length });
       targets.forEach(send);
       return;
     }
@@ -493,8 +514,10 @@ export class Simulator {
   private l3Receive(device: Device, entry: L3If, frame: Frame): void {
     if (!entry.up) return this.drop('l3.ifDown', { iface: entry.name });
     const virtual = this.topo.virtualFor(device, entry);
-    if (frame.dst !== entry.mac && frame.dst !== BROADCAST_MAC && frame.dst !== virtual?.mac) return this.drop('l3.notMyMac', { mac: frame.dst });
+    const multicast = frame.type === 'ipv6' && isMulticastMac(frame.dst);
+    if (frame.dst !== entry.mac && frame.dst !== BROADCAST_MAC && frame.dst !== virtual?.mac && !multicast) return this.drop('l3.notMyMac', { mac: frame.dst });
     if (frame.type === 'arp') return this.arpReceive(device, entry, frame);
+    if (frame.type === 'ipv6' && frame.ip6) return this.ip6Receive(device, entry, frame);
     if (frame.ip) this.ipReceive(device, entry, frame.ip);
   }
 
@@ -1411,6 +1434,198 @@ export class Simulator {
       return item.kind === 'synack' ? 'open' : 'refused';
     }
     return 'timeout';
+  }
+
+  ndTable(device: Device): { ip: bigint; mac: string; ifName: string }[] {
+    return [...this.st(device).nd.entries()].map(([ip, entry]) => ({ ip, ...entry })).sort((a, b) => (a.ip < b.ip ? -1 : 1));
+  }
+
+  private ip6Receive(device: Device, entry: L3If, frame: Frame): void {
+    const pkt = frame.ip6!;
+    const me = this.topo.ip6If(device, entry.name);
+    if (!me) return this.drop('ip6.disabled', { iface: entry.name });
+    const st = this.st(device);
+    const icmp = pkt.icmp6;
+    if (icmp.type === 'ns') {
+      if (!me.addrs.some((a) => a.addr === icmp.target)) return this.drop('nd.notForMe', { ip: formatIpv6(icmp.target) });
+      st.nd.set(pkt.src, { mac: icmp.mac || frame.src, ifName: entry.name });
+      this.note('nd.solicitForMe', { ip: formatIpv6(icmp.target), mac: entry.mac });
+      this.l3Transmit(device, entry, {
+        src: entry.mac,
+        dst: frame.src,
+        vlan: null,
+        type: 'ipv6',
+        ip6: { src: icmp.target, dst: pkt.src, hop: 255, icmp6: { type: 'na', code: 0, id: 0, seq: 0, target: icmp.target, mac: entry.mac } },
+      });
+      this.flushPending6(device, pkt.src);
+      return;
+    }
+    if (icmp.type === 'na') {
+      st.nd.set(icmp.target, { mac: icmp.mac, ifName: entry.name });
+      this.note('nd.learned', { ip: formatIpv6(icmp.target), mac: icmp.mac });
+      this.flushPending6(device, icmp.target);
+      return;
+    }
+    if (pkt.dst === ALL_NODES || this.topo.ownsIp6(device, pkt.dst)) return this.localDeliver6(device, pkt);
+    if (!this.topo.isRouting6(device)) return this.drop(isHost(device.kind) ? 'ip6.notForMe' : 'ip6.notRouting', { ip: formatIpv6(pkt.dst) });
+    this.forward6(device, entry, pkt);
+  }
+
+  private forward6(device: Device, inIf: L3If, original: Ipv6Packet): void {
+    if (original.hop <= 1) {
+      this.drop('ip6.hopExpired');
+      return this.sendIcmp6Error(device, inIf, original, 'time-exceeded', 0);
+    }
+    const found = this.topo.lookup6(device, original.dst);
+    if (!found) {
+      this.drop('ip6.noRoute', { ip: formatIpv6(original.dst) });
+      return this.sendIcmp6Error(device, inIf, original, 'unreachable', 0);
+    }
+    const outIf = this.topo.l3If(device, found.ifName)!;
+    this.note('ip6.forward', { net: `${formatIpv6(found.route.net)}/${found.route.prefix}`, via: formatIpv6(found.nextHop), iface: this.shortIf(device, outIf), code: found.route.code });
+    this.sendIp6(device, outIf, found.nextHop, { ...original, hop: original.hop - 1 });
+  }
+
+  private sendIp6(device: Device, outIf: L3If, nextHop: bigint, pkt: Ipv6Packet): void {
+    const st = this.st(device);
+    if (isMulticast6(nextHop)) {
+      this.l3Transmit(device, outIf, { src: outIf.mac, dst: multicastMac(nextHop), vlan: null, type: 'ipv6', ip6: pkt });
+      return;
+    }
+    const cached = st.nd.get(nextHop);
+    if (cached) {
+      this.l3Transmit(device, outIf, { src: outIf.mac, dst: cached.mac, vlan: null, type: 'ipv6', ip6: pkt });
+      return;
+    }
+    const me = this.topo.ip6If(device, outIf.name);
+    if (!me) return;
+    const asking = st.pending6.some((item) => item.nextHop === nextHop);
+    if (this.topo.isRouting6(device)) {
+      this.note('nd.routerDrop', { ip: formatIpv6(nextHop) });
+      if (this.current) this.current.outcome = 'drop';
+    } else {
+      st.pending6.push({ ifName: outIf.name, nextHop, pkt });
+      if (asking) return;
+      this.note('nd.queueAndAsk', { ip: formatIpv6(nextHop) });
+    }
+    const group = solicitedNode(nextHop);
+    this.l3Transmit(device, outIf, {
+      src: outIf.mac,
+      dst: multicastMac(group),
+      vlan: null,
+      type: 'ipv6',
+      ip6: { src: this.sourceFor(device, outIf.name, nextHop) ?? me.linkLocal, dst: group, hop: 255, icmp6: { type: 'ns', code: 0, id: 0, seq: 0, target: nextHop, mac: outIf.mac } },
+    });
+  }
+
+  private flushPending6(device: Device, ip: bigint): void {
+    const st = this.st(device);
+    const ready = st.pending6.filter((item) => item.nextHop === ip);
+    if (!ready.length) return;
+    st.pending6 = st.pending6.filter((item) => item.nextHop !== ip);
+    const mac = st.nd.get(ip)!.mac;
+    for (const item of ready) {
+      const entry = this.topo.l3If(device, item.ifName);
+      if (!entry) continue;
+      this.note('ip.sendQueued', { ip: formatIpv6(item.pkt.dst) });
+      this.l3Transmit(device, entry, { src: entry.mac, dst: mac, vlan: null, type: 'ipv6', ip6: item.pkt });
+    }
+  }
+
+  private sourceFor(device: Device, ifName: string, dst: bigint): bigint | null {
+    const me = this.topo.ip6If(device, ifName);
+    if (!me) return null;
+    if (isLinkLocal(dst)) return me.linkLocal;
+    return me.addrs.find((a) => a.origin !== 'link-local')?.addr ?? me.linkLocal;
+  }
+
+  private originate6(device: Device, pkt: Ipv6Packet): 'sent' | 'no-route' | 'no-ip' {
+    if (this.topo.ownsIp6(device, pkt.dst)) {
+      this.localDeliver6(device, { ...pkt, src: pkt.src || pkt.dst });
+      return 'sent';
+    }
+    const found = this.topo.lookup6(device, pkt.dst);
+    if (!found) return this.topo.ip6Ifs(device).length ? 'no-route' : 'no-ip';
+    const outIf = this.topo.l3If(device, found.ifName)!;
+    const src = pkt.src || this.sourceFor(device, found.ifName, pkt.dst);
+    if (src === null) return 'no-ip';
+    this.note(found.route.prefix === 0 ? 'ip6.originateGateway' : 'ip6.originate', { dst: formatIpv6(pkt.dst), via: formatIpv6(found.nextHop), iface: this.shortIf(device, outIf) });
+    this.sendIp6(device, outIf, found.nextHop, { ...pkt, src });
+    return 'sent';
+  }
+
+  private localDeliver6(device: Device, pkt: Ipv6Packet): void {
+    const icmp = pkt.icmp6;
+    if (icmp.type === 'echo-request') {
+      if (isMulticast6(pkt.dst)) return this.drop('icmp.ignoreBroadcast');
+      this.note('icmp6.echoReply', { ip: formatIpv6(pkt.src) });
+      const result = this.originate6(device, { src: pkt.dst, dst: pkt.src, hop: 64, icmp6: { ...icmp, type: 'echo-reply' } });
+      if (result !== 'sent') this.note('ip.replyNoRoute', { ip: formatIpv6(pkt.src) });
+      return;
+    }
+    this.note('icmp.delivered', { type: icmp.type });
+    this.st(device).inbox.push({ kind: 'icmp6', msg: icmp, from: pkt.src, hop: pkt.hop, time: this.time });
+  }
+
+  private sendIcmp6Error(device: Device, inIf: L3If, original: Ipv6Packet, type: 'unreachable' | 'time-exceeded', code: number): void {
+    if (original.icmp6.type !== 'echo-request') return;
+    const src = this.sourceFor(device, inIf.name, original.src);
+    if (src === null) return;
+    const result = this.originate6(device, {
+      src,
+      dst: original.src,
+      hop: 64,
+      icmp6: { type, code, id: original.icmp6.id, seq: original.icmp6.seq, target: 0n, mac: '', original: { src: original.src, dst: original.dst, id: original.icmp6.id, seq: original.icmp6.seq } },
+    });
+    if (result !== 'sent') this.note('ip.replyNoRoute', { ip: formatIpv6(original.src) });
+  }
+
+  echo6(deviceId: string, dst: bigint, hop?: number): Echo6Result {
+    const device = this.dev(deviceId);
+    const st = this.st(device);
+    const id = st.counters.icmpId;
+    const seq = st.counters.icmpId++;
+    const start = this.time;
+    this.beginAction();
+    this.note('icmp.create', { dst: formatIpv6(dst) });
+    const sent = this.originate6(device, { src: 0n, dst, hop: hop ?? 64, icmp6: { type: 'echo-request', code: 0, id, seq, target: 0n, mac: '' } });
+    if (sent !== 'sent') {
+      this.outNotes = [];
+      this.endAction();
+      return { outcome: sent, from: null, hop: 0, rtt: 0 };
+    }
+    this.run();
+    const index = st.inbox.findIndex(
+      (item) =>
+        (item.kind === 'icmp6' && (item.msg.type === 'echo-reply' ? item.msg.id === id && item.msg.seq === seq : item.msg.original?.id === id && item.msg.original.seq === seq)) ||
+        (item.kind === 'nd-fail' && item.pkt.icmp6.id === id && item.pkt.icmp6.seq === seq),
+    );
+    this.endAction();
+    if (index < 0) return { outcome: 'timeout', from: null, hop: 0, rtt: 0 };
+    const item = st.inbox.splice(index, 1)[0];
+    if (item.kind === 'nd-fail') return { outcome: 'host-unreachable', from: item.pkt.src, hop: 0, rtt: 0 };
+    if (item.kind !== 'icmp6') return { outcome: 'timeout', from: null, hop: 0, rtt: 0 };
+    const rtt = Math.max(0, item.time - start);
+    if (item.msg.type === 'echo-reply') return { outcome: 'reply', from: item.from, hop: item.hop, rtt };
+    if (item.msg.type === 'time-exceeded') return { outcome: 'ttl-expired', from: item.from, hop: item.hop, rtt };
+    return { outcome: 'net-unreachable', from: item.from, hop: item.hop, rtt };
+  }
+
+  traceroute6(deviceId: string, dst: bigint, maxHops = 30): Echo6Result[] {
+    const hops: Echo6Result[] = [];
+    for (let hop = 1; hop <= maxHops; hop++) {
+      let result = this.echo6(deviceId, dst, hop);
+      if (result.outcome === 'timeout') result = this.echo6(deviceId, dst, hop);
+      hops.push(result);
+      if (['reply', 'no-route', 'no-ip', 'net-unreachable', 'host-unreachable'].includes(result.outcome)) break;
+      if (hops.length >= 4 && hops.slice(-4).every((h) => h.outcome === 'timeout')) break;
+    }
+    return hops;
+  }
+
+  canReach6(deviceId: string, dst: bigint, attempts = 5): boolean {
+    for (let i = 0; i < attempts; i++) if (this.echo6(deviceId, dst).outcome === 'reply') return true;
+    return false;
   }
 
   canReach(deviceId: string, dst: number, attempts = 4): boolean {
