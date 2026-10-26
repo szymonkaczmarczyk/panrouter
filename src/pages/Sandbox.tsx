@@ -8,8 +8,9 @@ import { normalizeNetwork } from '../sim/normalize';
 import { decodeNetwork, shareParam } from '../sim/share';
 import type { Network } from '../sim/types';
 import { SimController } from '../sim/ui/controller';
+import { SimTour } from '../sim/ui/SimTour';
 import { Workspace } from '../sim/ui/Workspace';
-import { progress, saveSandbox } from '../state/progress';
+import { finishSimTour, progress, saveSandbox } from '../state/progress';
 import { Dialog } from '../ui/Dialog';
 import { toast } from '../ui/toast';
 
@@ -20,6 +21,7 @@ export function Sandbox() {
   const [incoming, setIncoming] = useState<Network | null>(null);
   const mounted = useRef(true);
   const shared = shareParam(path.value);
+  const [tour, setTour] = useState(() => !progress.value.simTour && !shared && ctrl.net.devices.length === 0);
 
   useEffect(() => {
     setMeta(
@@ -69,7 +71,21 @@ export function Sandbox() {
   const count = ctrl.net.devices.length;
   return (
     <>
-      <Workspace ctrl={ctrl} allowFiles />
+      <Workspace
+        ctrl={ctrl}
+        allowFiles
+        overlay={
+          tour && (
+            <SimTour
+              ctrl={ctrl}
+              onFinish={() => {
+                setTour(false);
+                finishSimTour();
+              }}
+            />
+          )
+        }
+      />
       {incoming && (
         <Dialog
           title={tx('Otworzyć sieć z linku?', 'Open the network from the link?')}

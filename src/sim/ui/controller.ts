@@ -47,6 +47,7 @@ export class SimController {
   canRedo = signal(false);
   connectFrom = signal<LinkEnd | null>(null);
   pduFrom = signal<string | null>(null);
+  lastPdu = signal<string | null>(null);
   placing = signal<DeviceKind | null>(null);
   flashes = signal<Flash[]>([]);
   terminals = new Map<string, TermState>();
@@ -340,6 +341,7 @@ export class SimController {
     const target = this.sim.topo.l3Ifs(to).find((e) => e.ip !== null && e.up);
     if (!target || target.ip === null) return 'no-target-ip';
     const result = this.sim.echo(fromId, target.ip);
+    this.lastPdu.value = result.outcome;
     this.bump();
     return result.outcome;
   }

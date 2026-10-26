@@ -35,6 +35,8 @@ function info(frame: Frame): string {
   }
   const ip = frame.ip;
   if (!ip) return '';
+  if (ip.proto === 'esp') return `ESP (SPI=0x${(ip.spi ?? 0).toString(16).padStart(8, '0')})`;
+  if (ip.proto === 'gre' && ip.inner) return `GRE: ${ipToStr(ip.inner.src)} → ${ipToStr(ip.inner.dst)} ${info({ ...frame, ip: ip.inner })}`;
   if (ip.icmp) {
     const i = ip.icmp;
     if (i.type === 'echo-request') return `Echo (ping) request id=0x${i.id.toString(16).padStart(4, '0')}, seq=${i.seq}, ttl=${ip.ttl}`;
@@ -136,6 +138,7 @@ const FIELDS: Record<string, Getter> = {
     const type = e.frame.ip?.icmp?.type;
     return type ? [{ 'echo-request': 8, 'echo-reply': 0, unreachable: 3, 'time-exceeded': 11 }[type]] : [];
   },
+  'esp.spi': (e) => (e.frame.ip?.proto === 'esp' ? [e.frame.ip.spi ?? 0] : []),
   'arp.opcode': (e) => (e.frame.arp ? [e.frame.arp.op === 'request' ? 1 : 2] : []),
   'dns.qry.name': (e) => (e.frame.ip?.udp?.dns ? [e.frame.ip.udp.dns.name.toLowerCase()] : []),
   'http.host': (e) => (e.frame.ip?.tcp?.http ? [e.frame.ip.tcp.http.host.toLowerCase()] : []),
@@ -156,6 +159,8 @@ const PROTOCOLS: Record<string, (e: TraceEvent) => boolean> = {
   dns: (e) => Boolean(e.frame.ip?.udp?.dns),
   http: (e) => Boolean(e.frame.ip?.tcp?.http) && e.frame.ip?.tcp?.dport !== 443 && e.frame.ip?.tcp?.sport !== 443,
   tls: (e) => Boolean(e.frame.ip?.tcp?.http) && (e.frame.ip?.tcp?.dport === 443 || e.frame.ip?.tcp?.sport === 443),
+  esp: (e) => e.frame.ip?.proto === 'esp',
+  gre: (e) => e.frame.ip?.proto === 'gre',
   vlan: (e) => e.frame.vlan !== null,
   dropped: (e) => e.outcome === 'drop',
 };
@@ -291,4 +296,4 @@ export function compileFilter(text: string): FilterResult {
   }
 }
 
-export const FILTER_EXAMPLES = ['icmp', 'arp or dhcp', 'ip.addr == 192.168.10.1', 'tcp.port == 80', 'dns', 'ipv6', 'ndp', 'vlan.id == 10', 'dropped'];
+export const FILTER_EXAMPLES = ['icmp', 'arp or dhcp', 'ip.addr == 192.168.10.1', 'tcp.port == 80', 'dns', 'ipv6', 'ndp', 'esp', 'vlan.id == 10', 'dropped'];

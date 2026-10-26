@@ -258,6 +258,7 @@
 
 .incident-level {
   width: 100%;
+  align-content: start;
   border: 1px solid var(--border);
   color: var(--text);
   font: inherit;
@@ -313,6 +314,11 @@
   flex: 1;
 }
 
+.incident-results {
+  display: grid;
+  gap: var(--space-2);
+}
+
 .incident-hints {
   display: grid;
   gap: var(--space-2);
@@ -348,4 +354,274 @@
   .spin {
     animation: none;
   }
+}
+
+.review-parts {
+  gap: var(--space-8);
+}
+
+.flashcard {
+  max-width: 640px;
+  gap: var(--space-4);
+}
+
+.flashcard-head {
+  justify-content: space-between;
+}
+
+.flashcard-term {
+  font-size: var(--fs-h3);
+}
+
+.flashcard-def {
+  font-size: var(--fs-body-lg);
+  max-width: 60ch;
+  animation: fade-in var(--dur) var(--ease-out);
+}
+
+.flashcard-actions {
+  margin-top: var(--space-2);
+}
+
+.review-done {
+  max-width: 640px;
+}
+
+.review-today {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+}
+
+.review-today > .stack {
+  flex: 1 1 260px;
+  gap: var(--space-1);
+}
+
+.search-box {
+  position: relative;
+  max-width: 560px;
+}
+
+.search-box > svg {
+  position: absolute;
+  top: 50%;
+  left: var(--space-3);
+  width: 18px;
+  height: 18px;
+  transform: translateY(-50%);
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+.search-box .input {
+  padding-left: var(--space-10);
+}
+
+.letters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: var(--space-4) 0 var(--space-6);
+}
+
+.letters a {
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--touch);
+  min-height: var(--touch);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-weight: 600;
+  text-decoration: none;
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.letters a:hover,
+.letters a:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.glossary > div {
+  scroll-margin-top: var(--space-8);
+}
+
+.term-review {
+  margin-top: var(--space-2);
+  margin-left: calc(var(--space-3) * -1);
+}
+
+.lab-checks {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.lab-checks > legend {
+  margin-bottom: var(--space-1);
+  padding: 0;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.lab-check-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lab-check-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr) 24px auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.lab-check-state svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ok-icon {
+  color: var(--ok);
+}
+
+.fail-icon {
+  color: var(--danger);
+}
+
+@media (max-width: 699px) {
+  .lab-check-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px auto;
+  }
+
+  .lab-check-row {
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .lab-check-row .input {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+.custom-lab-text {
+  gap: var(--space-3);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.exam-chart {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.exam-chart-box {
+  width: 100%;
+  min-width: 0;
+}
+
+.exam-chart svg {
+  display: block;
+  overflow: visible;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.exam-chart-tip {
+  min-height: 1.6em;
+  font-size: var(--fs-small);
+  color: var(--text-muted);
+}
+
+.chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.chart-pass {
+  stroke: var(--text-dim);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.chart-axis {
+  fill: var(--text-dim);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.chart-pass-label {
+  fill: var(--text-muted);
+}
+
+.chart-value {
+  fill: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.chart-hit {
+  fill: transparent;
+}
+
+.chart-bar {
+  cursor: default;
+  outline: none;
+}
+
+.chart-bar-fill {
+  fill: var(--accent);
+  opacity: 0.85;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.chart-bar.is-active .chart-bar-fill {
+  opacity: 1;
+}
+
+.chart-bar:last-of-type .chart-value {
+  opacity: 1;
+}
+
+.chart-bar:focus-visible .chart-hit {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.stats-more {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-2);
+}
+
+.table-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--touch);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.table-link svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
 }

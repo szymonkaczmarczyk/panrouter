@@ -110,6 +110,8 @@ function port(value: unknown): Port | null {
   out.nat = oneOf(raw.nat, ['', 'inside', 'outside'] as const, '');
   out.channelMode = oneOf(raw.channelMode, ['', 'active', 'passive', 'on'] as const, '');
   out.prefix = int(raw.prefix, 24, 0, 32);
+  out.ospf6Pid = int(raw.ospf6Pid, 0, 0, 65535);
+  out.ospf6Area = int(raw.ospf6Area, 0, 0, 4294967295);
   out.speed = int(raw.speed, 1000, 10, 400000);
   out.accessVlan = int(raw.accessVlan, 1, 1, 4094);
   out.nativeVlan = int(raw.nativeVlan, 1, 1, 4094);
@@ -123,12 +125,15 @@ function port(value: unknown): Port | null {
 function vif(value: unknown): VirtualIf | null {
   const raw = record(value);
   if (!raw || typeof raw.name !== 'string' || !raw.name) return null;
-  const kind = oneOf(raw.kind, ['sub', 'svi', 'loop'] as const, 'loop');
+  const kind = oneOf(raw.kind, ['sub', 'svi', 'loop', 'tunnel'] as const, 'loop');
   const out = mergePrimitives(blankVif(kind, str(raw.name, '', 64)), raw);
   out.kind = kind;
   out.nat = oneOf(raw.nat, ['', 'inside', 'outside'] as const, '');
   out.prefix = int(raw.prefix, 24, 0, 32);
   out.vlan = int(raw.vlan, 0, 0, 4094);
+  out.tunnelMode = oneOf(raw.tunnelMode, ['gre', 'ipsec'] as const, 'gre');
+  out.ospf6Pid = int(raw.ospf6Pid, 0, 0, 65535);
+  out.ospf6Area = int(raw.ospf6Area, 0, 0, 4294967295);
   out.fhrp = fhrp(raw.fhrp);
   out.ipv6 = ipv6List(raw.ipv6);
   return out;
@@ -243,6 +248,24 @@ function device(value: unknown, scratch: Network): Device | null {
         defaultOriginate: bool(ospf.defaultOriginate, false),
       }
     : null;
+  const ospf6 = record(raw.ospf6);
+  out.ospf6 = ospf6
+    ? {
+        processId: int(ospf6.processId, 1, 1, 65535),
+        routerId: str(ospf6.routerId, '', 15),
+        passive: list(ospf6.passive, (v) => (typeof v === 'string' ? v.slice(0, 64) : null)),
+        defaultOriginate: bool(ospf6.defaultOriginate, false),
+      }
+    : null;
+  out.dhcp6Pools = list(raw.dhcp6Pools, (v) => {
+    const r = record(v);
+    return r ? { name: str(r.name, 'POOL6', 64), prefix: str(r.prefix, '', 43).toLowerCase(), dns: str(r.dns, '', 39).toLowerCase(), domain: str(r.domain, '', 64) } : null;
+  });
+  out.cryptoKeys = list(raw.cryptoKeys, (v) => {
+    const r = record(v);
+    return r ? { key: str(r.key, '', 128), peer: str(r.peer, '', 15) } : null;
+  }, 32);
+  out.ipsecProfiles = list(raw.ipsecProfiles, (v) => (typeof v === 'string' && v ? v.slice(0, 64) : null), 16);
   out.acls = list(raw.acls, acl);
   out.nat = list(raw.nat, natRule);
   const wifi = record(raw.wifi);

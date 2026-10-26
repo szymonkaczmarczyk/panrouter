@@ -41,6 +41,11 @@ export interface L3Config {
   ipv6Enable: boolean;
   ipv6Slaac: boolean;
   gateway6: string;
+  ospf6Pid: number;
+  ospf6Area: number;
+  dhcp6Server: string;
+  ndManaged: boolean;
+  ndOther: boolean;
 }
 
 export interface StaticRoute6 {
@@ -87,13 +92,24 @@ export interface Port extends L3Config {
   channelMode: ChannelMode;
 }
 
+export type TunnelMode = 'gre' | 'ipsec';
+
 export interface VirtualIf extends L3Config {
   name: string;
-  kind: 'sub' | 'svi' | 'loop';
+  kind: 'sub' | 'svi' | 'loop' | 'tunnel';
   parent: string;
   vlan: number;
   shutdown: boolean;
   description: string;
+  tunnelSource: string;
+  tunnelDest: string;
+  tunnelMode: TunnelMode;
+  tunnelProtection: string;
+}
+
+export interface CryptoKey {
+  key: string;
+  peer: string;
 }
 
 export interface StaticRoute {
@@ -173,6 +189,20 @@ export interface OspfConfig {
   defaultOriginate: boolean;
 }
 
+export interface Ospf6Config {
+  processId: number;
+  routerId: string;
+  passive: string[];
+  defaultOriginate: boolean;
+}
+
+export interface Dhcp6Pool {
+  name: string;
+  prefix: string;
+  dns: string;
+  domain: string;
+}
+
 export interface WifiConfig {
   ssid: string;
   security: 'wpa3' | 'wpa2' | 'open';
@@ -219,6 +249,10 @@ export interface Device {
   services: { dhcp: boolean; dns: boolean; http: boolean };
   web: { title: string; body: string };
   ospf: OspfConfig | null;
+  ospf6: Ospf6Config | null;
+  dhcp6Pools: Dhcp6Pool[];
+  cryptoKeys: CryptoKey[];
+  ipsecProfiles: string[];
   acls: Acl[];
   nat: NatRule[];
   wifi: WifiConfig | null;
@@ -338,10 +372,12 @@ export interface Ipv4Packet {
   src: number;
   dst: number;
   ttl: number;
-  proto: 'icmp' | 'udp' | 'tcp';
+  proto: 'icmp' | 'udp' | 'tcp' | 'esp' | 'gre';
   icmp?: IcmpMsg;
   udp?: UdpSeg;
   tcp?: TcpSeg;
+  inner?: Ipv4Packet;
+  spi?: number;
 }
 
 export type Icmp6Type = 'echo-request' | 'echo-reply' | 'ns' | 'na' | 'unreachable' | 'time-exceeded';
@@ -381,7 +417,7 @@ export interface Frame {
   ip6?: Ipv6Packet;
 }
 
-export type Protocol = 'ARP' | 'ICMP' | 'DHCP' | 'DNS' | 'TCP' | 'HTTP' | 'HTTPS' | 'UDP' | 'ICMPv6' | 'NDP';
+export type Protocol = 'ARP' | 'ICMP' | 'DHCP' | 'DNS' | 'TCP' | 'HTTP' | 'HTTPS' | 'UDP' | 'ICMPv6' | 'NDP' | 'ESP' | 'GRE';
 
 export interface TraceEvent {
   seq: number;

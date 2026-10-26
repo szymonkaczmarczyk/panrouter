@@ -2,17 +2,18 @@ import type { Device } from '../types';
 
 export interface IfaceRef {
   name: string;
-  kind: 'port' | 'sub' | 'svi' | 'loop' | 'po';
+  kind: 'port' | 'sub' | 'svi' | 'loop' | 'po' | 'tunnel';
   exists: boolean;
   parent?: string;
   vlan?: number;
   number?: number;
 }
 
-const VIRTUAL_TYPES: { long: string; kind: 'svi' | 'loop' | 'po' }[] = [
+const VIRTUAL_TYPES: { long: string; kind: 'svi' | 'loop' | 'po' | 'tunnel' }[] = [
   { long: 'vlan', kind: 'svi' },
   { long: 'loopback', kind: 'loop' },
   { long: 'port-channel', kind: 'po' },
+  { long: 'tunnel', kind: 'tunnel' },
 ];
 
 function splitType(text: string): { type: string; rest: string } | null {
@@ -35,7 +36,7 @@ export function resolveIface(device: Device, text: string, allowCreate: boolean)
   if (!parts || !parts.rest) return null;
   const { type, rest } = parts;
   const physical = portTypes(device).filter((t) => t.startsWith(type) || shortOf(device, t).toLowerCase() === type);
-  const virtual = device.kind === 'router' ? VIRTUAL_TYPES.filter((v) => v.kind === 'loop') : VIRTUAL_TYPES;
+  const virtual = device.kind === 'router' ? VIRTUAL_TYPES.filter((v) => v.kind === 'loop' || v.kind === 'tunnel') : VIRTUAL_TYPES.filter((v) => v.kind !== 'tunnel');
   const virtualMatches = virtual.filter((v) => v.long.startsWith(type) && type.length >= 2);
   if (physical.length + virtualMatches.length > 1) {
     const exact = physical.filter((t) => device.ports.some((p) => p.name.toLowerCase() === `${t}${rest.split('.')[0]}`));
@@ -53,7 +54,7 @@ export function resolveIface(device: Device, text: string, allowCreate: boolean)
       if (number < 1 || number > 64) return null;
       return { name: `Port-channel${number}`, kind, exists: device.ports.some((p) => p.channelGroup === number), number };
     }
-    const name = kind === 'svi' ? `Vlan${number}` : `Loopback${number}`;
+    const name = kind === 'svi' ? `Vlan${number}` : kind === 'tunnel' ? `Tunnel${number}` : `Loopback${number}`;
     const exists = device.vifs.some((v) => v.name.toLowerCase() === name.toLowerCase());
     if (!exists && !allowCreate) return null;
     return { name, kind, exists, number, vlan: kind === 'svi' ? number : undefined };
@@ -113,6 +114,7 @@ export function shortIfName(device: Device, name: string): string {
   }
   if (name.startsWith('Loopback')) return name.replace('Loopback', 'Lo');
   if (name.startsWith('Vlan')) return name.replace('Vlan', 'Vl');
+  if (name.startsWith('Tunnel')) return name.replace('Tunnel', 'Tu');
   if (name.startsWith('Port-channel')) return name.replace('Port-channel', 'Po');
   return name;
 }

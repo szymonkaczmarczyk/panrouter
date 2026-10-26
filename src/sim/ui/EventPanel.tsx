@@ -1,4 +1,4 @@
-import { CircleCheck, CircleX, Pause, Play, RotateCcw, ScanSearch, SkipBack, SkipForward, X } from 'lucide-preact';
+import { ChevronDown, ChevronUp, CircleCheck, CircleX, Pause, Play, RotateCcw, ScanSearch, SkipBack, SkipForward, X } from 'lucide-preact';
 import { useEffect, useState } from 'preact/hooks';
 import { lang, tx } from '../../i18n';
 import { explain } from '../explain';
@@ -9,7 +9,7 @@ import { PROTO_COLOR, stepTimes } from './Canvas';
 import type { SimController } from './controller';
 import { PacketAnalyzer } from './PacketAnalyzer';
 
-const PROTOCOLS = ['ARP', 'ICMP', 'DHCP', 'DNS', 'TCP', 'HTTP', 'HTTPS', 'ICMPv6', 'NDP'];
+const PROTOCOLS = ['ARP', 'ICMP', 'DHCP', 'DNS', 'TCP', 'HTTP', 'HTTPS', 'ICMPv6', 'NDP', 'ESP', 'GRE'];
 
 function macText(mac: string): string {
   if (mac === 'ffffffffffff') return `ff:ff:ff:ff:ff:ff (${tx('rozgłoszenie', 'broadcast')})`;
@@ -73,9 +73,31 @@ export function Layers({ frame }: { frame: Frame }) {
         [tx('Adres źródłowy', 'Source address'), ip.src ? ipToStr(ip.src) : '0.0.0.0'],
         [tx('Adres docelowy', 'Destination address'), ipToStr(ip.dst)],
         ['TTL', String(ip.ttl)],
-        [tx('Protokół', 'Protocol'), ip.proto.toUpperCase()],
+        [tx('Protokół', 'Protocol'), ip.proto === 'esp' ? '50 (ESP)' : ip.proto === 'gre' ? '47 (GRE)' : ip.proto.toUpperCase()],
       ],
     });
+    if (ip.proto === 'esp') {
+      rows.push({
+        layer: 'L3',
+        title: tx('ESP (IPsec, zaszyfrowane)', 'ESP (IPsec, encrypted)'),
+        fields: [
+          ['SPI', `0x${(ip.spi ?? 0).toString(16).padStart(8, '0')}`],
+          [tx('Zawartość', 'Payload'), tx('zaszyfrowany cały pakiet ze środka, po drodze nikt go nie odczyta', 'the whole inner packet, encrypted, nobody on the way can read it')],
+        ],
+      });
+    }
+    if (ip.proto === 'gre' && ip.inner) {
+      rows.push({
+        layer: 'L3',
+        title: tx('GRE i pakiet w środku (bez szyfrowania)', 'GRE and the inner packet (not encrypted)'),
+        fields: [
+          [tx('Typ ładunku', 'Payload type'), '0x0800 (IPv4)'],
+          [tx('Wewnętrzne źródło', 'Inner source'), ipToStr(ip.inner.src)],
+          [tx('Wewnętrzny cel', 'Inner destination'), ipToStr(ip.inner.dst)],
+          [tx('Wewnętrzny protokół', 'Inner protocol'), ip.inner.proto.toUpperCase()],
+        ],
+      });
+    }
     if (ip.icmp) {
       const names: Record<string, string> = {
         'echo-request': tx('żądanie echa (8)', 'echo request (8)'),
@@ -172,6 +194,7 @@ export function EventPanel({ ctrl }: { ctrl: SimController }) {
   const currentTime = times[step];
   const selected = ctrl.selectedEvent.value !== null ? events[ctrl.selectedEvent.value] : null;
   const [analyzer, setAnalyzer] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     if (!playing) return;
@@ -208,8 +231,11 @@ export function EventPanel({ ctrl }: { ctrl: SimController }) {
   };
 
   return (
-    <section class="event-panel" aria-label={tx('Panel symulacji', 'Simulation panel')}>
+    <section class={`event-panel ${collapsed ? 'is-collapsed' : ''}`} aria-label={tx('Panel symulacji', 'Simulation panel')}>
       <header class="panel-head">
+        <button type="button" class="btn btn-ghost btn-icon sheet-toggle" onClick={() => setCollapsed(!collapsed)} aria-expanded={!collapsed} aria-label={collapsed ? tx('Rozwiń panel symulacji', 'Expand the simulation panel') : tx('Zwiń panel symulacji', 'Collapse the simulation panel')}>
+          {collapsed ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
+        </button>
         <div class="panel-title">
           <strong>{tx('Symulacja krok po kroku', 'Step-by-step simulation')}</strong>
           <span class="dim small">

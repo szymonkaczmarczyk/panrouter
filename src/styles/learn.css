@@ -219,7 +219,7 @@
   margin: 0;
 }
 
-.terms div {
+.terms > div {
   display: grid;
   grid-template-columns: minmax(120px, 200px) minmax(0, 1fr);
   gap: var(--space-4);
@@ -661,7 +661,7 @@
     text-align: left;
   }
 
-  .terms div {
+  .terms > div {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-1);
   }

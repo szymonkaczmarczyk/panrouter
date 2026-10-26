@@ -177,7 +177,7 @@ function Ipv6Form({ ctrl, device, port }: { ctrl: SimController; device: Device;
       <div class="segmented" role="radiogroup" aria-label={tx('Konfiguracja IPv6', 'IPv6 configuration')}>
         {(
           [
-            ['auto', 'Automatycznie (SLAAC)', 'Automatic (SLAAC)'],
+            ['auto', 'Automatycznie (SLAAC, DHCPv6)', 'Automatic (SLAAC, DHCPv6)'],
             ['static', 'Statycznie', 'Static'],
             ['off', 'Wyłączone', 'Off'],
           ] as [Ipv6Mode, string, string][]
@@ -193,12 +193,17 @@ function Ipv6Form({ ctrl, device, port }: { ctrl: SimController; device: Device;
           <Field id={`gw6-${port.name}`} label={tx('Brama IPv6 (opcjonalnie)', 'IPv6 gateway (optional)')} value={gateway} onInput={setGateway} error={touched ? errors.gateway : null} help={tx('Puste pole: brama z ogłoszenia routera (RA).', 'Empty: gateway from the router advertisement (RA).')} placeholder="2001:db8:1::1" mono />
         </div>
       )}
-      {mode === 'auto' && <p class="small muted">{tx('Komputer sam zbuduje adres z prefiksu ogłaszanego przez router i swojego adresu MAC (EUI-64). Router musi mieć ipv6 unicast-routing i adres /64 na interfejsie.', 'The computer builds its address from the router-advertised prefix and its MAC (EUI-64). The router needs ipv6 unicast-routing and a /64 address on the interface.')}</p>}
+      {mode === 'auto' && <p class="small muted">{tx('Komputer sam zbuduje adres z prefiksu ogłaszanego przez router i swojego adresu MAC (EUI-64). Router musi mieć ipv6 unicast-routing i adres /64 na interfejsie. Jeśli router ustawi flagę M albo O i serwer DHCPv6, komputer dostanie też adres albo DNS z DHCPv6.', 'The computer builds its address from the router-advertised prefix and its MAC (EUI-64). The router needs ipv6 unicast-routing and a /64 address on the interface. If the router sets the M or O flag and a DHCPv6 server, the computer also gets an address or DNS from DHCPv6.')}</p>}
+      {live?.dns6 != null && (
+        <p class="small mono">
+          DNS (DHCPv6): {formatIpv6(live.dns6)}
+        </p>
+      )}
       {live && (
         <ul class="mono small ipv6-list">
           {live.addrs.map((a) => (
             <li key={String(a.addr)}>
-              {formatIpv6(a.addr)}/{a.prefix} <span class="dim">({a.origin === 'link-local' ? 'link-local' : a.origin === 'slaac' ? 'SLAAC' : tx('statyczny', 'static')})</span>
+              {formatIpv6(a.addr)}/{a.prefix} <span class="dim">({a.origin === 'link-local' ? 'link-local' : a.origin === 'slaac' ? 'SLAAC' : a.origin === 'dhcpv6' ? 'DHCPv6' : tx('statyczny', 'static')})</span>
             </li>
           ))}
         </ul>

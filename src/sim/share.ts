@@ -46,14 +46,18 @@ async function readLimited(stream: ReadableStream<Uint8Array>, limit: number): P
   return out;
 }
 
-export async function encodeNetwork(net: Network): Promise<string> {
-  const json = new TextEncoder().encode(JSON.stringify(net));
+export async function encodePayload(value: unknown): Promise<string> {
+  const json = new TextEncoder().encode(JSON.stringify(value));
   const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw'));
   const bytes = await readLimited(stream, Number.MAX_SAFE_INTEGER);
   return `${VERSION}.${toBase64Url(bytes!)}`;
 }
 
-export async function decodeNetwork(data: string): Promise<Network | null> {
+export function encodeNetwork(net: Network): Promise<string> {
+  return encodePayload(net);
+}
+
+export async function decodePayload(data: string): Promise<unknown> {
   if (data.length > MAX_ENCODED) return null;
   const [version, payload] = data.split('.', 2);
   if (version !== VERSION || !payload) return null;
@@ -63,18 +67,27 @@ export async function decodeNetwork(data: string): Promise<Network | null> {
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
     const json = await readLimited(stream, MAX_JSON);
     if (!json) return null;
-    return normalizeNetwork(JSON.parse(new TextDecoder().decode(json)));
+    return JSON.parse(new TextDecoder().decode(json));
   } catch {
     return null;
   }
+}
+
+export async function decodeNetwork(data: string): Promise<Network | null> {
+  const value = await decodePayload(data);
+  return value === null ? null : normalizeNetwork(value);
 }
 
 export function shareUrl(data: string): string {
   return `${window.location.origin}${window.location.pathname}#/symulator?siec=${data}`;
 }
 
-export function shareParam(path: string): string | null {
+export function queryParam(path: string, name: string): string | null {
   const query = path.split('?')[1];
   if (!query) return null;
-  return new URLSearchParams(query).get('siec');
+  return new URLSearchParams(query).get(name);
+}
+
+export function shareParam(path: string): string | null {
+  return queryParam(path, 'siec');
 }

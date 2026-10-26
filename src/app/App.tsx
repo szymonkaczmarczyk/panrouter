@@ -20,6 +20,9 @@ const DevicesPage = lazyPage(() => import('../pages/Library').then((m) => m.Devi
 const Settings = lazyPage(() => import('../pages/Settings').then((m) => m.Settings));
 const Privacy = lazyPage(() => import('../pages/Legal').then((m) => m.Privacy));
 const Terms = lazyPage(() => import('../pages/Legal').then((m) => m.Terms));
+const CustomLabPage = lazyPage(() => import('../pages/CustomLab').then((m) => m.CustomLabPage));
+const StatsPage = lazyPage(() => import('../pages/Stats').then((m) => m.StatsPage));
+const ReviewPage = lazyPage(() => import('../pages/Review').then((m) => m.ReviewPage));
 const IncidentSetup = lazyPage(() => import('../pages/Incident').then((m) => m.IncidentSetup));
 const IncidentRunPage = lazyPage(() => import('../pages/Incident').then((m) => m.IncidentRunPage));
 const NotFound = lazyPage(() => import('../pages/NotFound').then((m) => m.NotFound));
@@ -36,6 +39,9 @@ const ROUTES: RouteDef[] = [
   { pattern: '/nauka', page: Learn, render: () => <Learn /> },
   { pattern: '/nauka/:id', page: ModulePage, render: (p) => <ModulePage id={p.id} /> },
   { pattern: '/quizy', page: QuizHub, render: () => <QuizHub /> },
+  { pattern: '/lab-z-linku', wide: true, page: CustomLabPage, render: () => <CustomLabPage /> },
+  { pattern: '/statystyki', page: StatsPage, render: () => <StatsPage /> },
+  { pattern: '/powtorki', page: ReviewPage, render: () => <ReviewPage /> },
   { pattern: '/quiz/:id', page: QuizPage, render: (p) => <QuizPage id={p.id} /> },
   { pattern: '/laboratoria', page: LabsPage, render: () => <LabsPage /> },
   { pattern: '/lab/:id', wide: true, page: LabPage, render: (p) => <LabPage id={p.id} /> },

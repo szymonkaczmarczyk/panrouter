@@ -86,7 +86,12 @@ function ipconfig(sim: Simulator, device: Device, lang: Lang, all: boolean): str
     }
     const v6 = sim.topo.ip6If(device, port.name);
     for (const a of v6?.addrs ?? []) {
-      const label = a.origin === 'link-local' ? t(lang, { pl: 'Adres IPv6 połączenia lokalnego', en: 'Link-local IPv6 Address' }) : t(lang, { pl: 'Adres IPv6', en: 'IPv6 Address' });
+      const label =
+        a.origin === 'link-local'
+          ? t(lang, { pl: 'Adres IPv6 połączenia lokalnego', en: 'Link-local IPv6 Address' })
+          : a.origin === 'dhcpv6'
+            ? t(lang, { pl: 'Adres IPv6 z DHCPv6', en: 'DHCPv6 IPv6 Address' })
+            : t(lang, { pl: 'Adres IPv6', en: 'IPv6 Address' });
       out.push(`${dots(label)}${formatIpv6(a.addr)}${a.origin === 'link-local' ? `%${port.name}` : ''}`);
     }
     const route6 = sim.topo.routes6(device).find((r) => r.prefix === 0 && r.ifName === port.name);
@@ -97,6 +102,7 @@ function ipconfig(sim: Simulator, device: Device, lang: Lang, all: boolean): str
         out.push(`${dots(t(lang, { pl: 'Serwer DHCP', en: 'DHCP Server' }))}${port.gateway || '-'}`);
       }
       out.push(`${dots(t(lang, { pl: 'Serwery DNS', en: 'DNS Servers' }))}${port.dns || '-'}`);
+      if (v6?.dns6 != null) out.push(`${dots(t(lang, { pl: 'Serwery DNS IPv6 (DHCPv6)', en: 'IPv6 DNS Servers (DHCPv6)' }))}${formatIpv6(v6.dns6)}`);
     }
     out.push('');
   }
@@ -311,7 +317,7 @@ function ipAddr(sim: Simulator, device: Device): string[] {
     out.push(`${index + 2}: ${port.name}: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500`);
     out.push(`    link/ether ${port.mac.match(/.{2}/g)!.join(':')} brd ff:ff:ff:ff:ff:ff`);
     if (port.ip) out.push(`    inet ${port.ip}/${port.prefix} scope global ${port.dhcp ? 'dynamic ' : ''}${port.name}`);
-    for (const a of sim.topo.ip6If(device, port.name)?.addrs ?? []) out.push(`    inet6 ${formatIpv6(a.addr)}/${a.prefix} scope ${a.origin === 'link-local' ? 'link' : `global${a.origin === 'slaac' ? ' dynamic' : ''}`}`);
+    for (const a of sim.topo.ip6If(device, port.name)?.addrs ?? []) out.push(`    inet6 ${formatIpv6(a.addr)}/${a.prefix} scope ${a.origin === 'link-local' ? 'link' : `global${a.origin === 'slaac' || a.origin === 'dhcpv6' ? ' dynamic' : ''}`}`);
   });
   return out;
 }

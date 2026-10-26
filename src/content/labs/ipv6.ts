@@ -132,4 +132,107 @@ export const IPV6_LABS: Lab[] = [
       check('c3', ['PC1 pinguje SRV1 (2001:db8:2::10)', 'PC1 pings SRV1 (2001:db8:2::10)'], ['Pierwsze pakiety mogą zginąć, zanim routery poznają sąsiadów.', 'The first packets may be lost while routers learn their neighbors.'], (c) => c.ping('PC1', '2001:db8:2::10')),
     ],
   },
+  {
+    id: 'ipv6-ospf-dhcp',
+    level: 4,
+    minutes: 25,
+    title: l('IPv6: OSPFv3 i DHCPv6', 'IPv6: OSPFv3 and DHCPv6'),
+    summary: l('Zamiast tras statycznych włącz OSPFv3 na dwóch routerach, a komputerom podaj serwer DNS przez bezstanowe DHCPv6.', 'Instead of static routes enable OSPFv3 on two routers and give the computers a DNS server through stateless DHCPv6.'),
+    goals: [l('Konfigurować OSPFv3 z router-id', 'Configure OSPFv3 with a router-id'), l('Rozróżniać flagi M i O oraz DHCPv6 stanowe i bezstanowe', 'Tell the M and O flags and stateful and stateless DHCPv6 apart')],
+    steps: {
+      pl: [
+        { t: 'p', text: 'Adresy IPv6 na routerach są gotowe: R1 ma sieć biura 2001:db8:1::/64, R2 sieć serwerów 2001:db8:2::/64 z SRV1 (2001:db8:2::10), a łącze to 2001:db8:12::/64. Routery nie mają żadnych tras do cudzych sieci.' },
+        {
+          t: 'code',
+          lines: ['R1(config)# ipv6 router ospf 1', 'R1(config-rtr)# router-id 1.1.1.1', 'R1(config-rtr)# interface g0/0/0', 'R1(config-if)# ipv6 ospf 1 area 0', 'R1(config-if)# interface g0/0/1', 'R1(config-if)# ipv6 ospf 1 area 0'],
+          caption: 'OSPFv3 włączasz na interfejsie, a nie poleceniem network. Router-id dalej jest w formacie IPv4, a bez żadnego adresu IPv4 trzeba go wpisać ręcznie.',
+        },
+        { t: 'p', text: 'Zrób to samo na R2 z router-id 2.2.2.2. Potem na R1 skonfiguruj bezstanowe DHCPv6: adres komputery dalej budują z SLAAC, a z serwera biorą tylko DNS i domenę.' },
+        {
+          t: 'code',
+          lines: ['R1(config)# ipv6 dhcp pool BIURO6', 'R1(config-dhcpv6)# dns-server 2001:db8:2::10', 'R1(config-dhcpv6)# domain-name firma.lan', 'R1(config-dhcpv6)# interface g0/0/0', 'R1(config-if)# ipv6 dhcp server BIURO6', 'R1(config-if)# ipv6 nd other-config-flag'],
+          caption: 'Flaga O (other) mówi: adres zrób sam, resztę weź z DHCPv6. Flaga M (managed) kazałaby wziąć z DHCPv6 także adres.',
+        },
+        {
+          t: 'list',
+          ordered: true,
+          items: [
+            'Na R1 sprawdź `show ipv6 ospf neighbor` i `show ipv6 route`. Trasy z OSPFv3 mają literę O, a następnym skokiem jest adres link-local sąsiada.',
+            'Na PC1 wpisz `ipconfig /all` i znajdź serwer DNS z DHCPv6.',
+            'Z PC1 wpisz `ping 2001:db8:2::10`.',
+          ],
+        },
+        { t: 'callout', kind: 'tip', text: 'Spróbuj dodać `ipv6 nd managed-config-flag` i adres prefix w puli. PC1 dostanie wtedy drugi adres, z DHCPv6, z maską /128.' },
+      ],
+      en: [
+        { t: 'p', text: 'The IPv6 addresses on the routers are ready: R1 has the office network 2001:db8:1::/64, R2 the server network 2001:db8:2::/64 with SRV1 (2001:db8:2::10), and the link is 2001:db8:12::/64. The routers have no routes to other networks.' },
+        {
+          t: 'code',
+          lines: ['R1(config)# ipv6 router ospf 1', 'R1(config-rtr)# router-id 1.1.1.1', 'R1(config-rtr)# interface g0/0/0', 'R1(config-if)# ipv6 ospf 1 area 0', 'R1(config-if)# interface g0/0/1', 'R1(config-if)# ipv6 ospf 1 area 0'],
+          caption: 'You enable OSPFv3 on the interface, not with a network command. The router-id still looks like IPv4, and without any IPv4 address you have to set it by hand.',
+        },
+        { t: 'p', text: 'Do the same on R2 with router-id 2.2.2.2. Then configure stateless DHCPv6 on R1: computers still build their address with SLAAC and take only DNS and the domain from the server.' },
+        {
+          t: 'code',
+          lines: ['R1(config)# ipv6 dhcp pool BIURO6', 'R1(config-dhcpv6)# dns-server 2001:db8:2::10', 'R1(config-dhcpv6)# domain-name firma.lan', 'R1(config-dhcpv6)# interface g0/0/0', 'R1(config-if)# ipv6 dhcp server BIURO6', 'R1(config-if)# ipv6 nd other-config-flag'],
+          caption: 'The O (other) flag says: build the address yourself and take the rest from DHCPv6. The M (managed) flag would take the address from DHCPv6 too.',
+        },
+        {
+          t: 'list',
+          ordered: true,
+          items: [
+            'On R1 run `show ipv6 ospf neighbor` and `show ipv6 route`. OSPFv3 routes have the letter O and the next hop is the neighbor’s link-local address.',
+            'On PC1 run `ipconfig /all` and find the DNS server from DHCPv6.',
+            'From PC1 run `ping 2001:db8:2::10`.',
+          ],
+        },
+        { t: 'callout', kind: 'tip', text: 'Try adding `ipv6 nd managed-config-flag` and an address prefix in the pool. PC1 then gets a second address from DHCPv6, with a /128 mask.' },
+      ],
+    },
+    build: () => {
+      const b = new NetBuilder();
+      const r1 = b.add('router', 'R1', 260, 160);
+      const r2 = b.add('router', 'R2', 520, 160);
+      const sw1 = b.add('switch', 'SW1', 160, 320);
+      const sw2 = b.add('switch', 'SW2', 620, 320);
+      const pc1 = b.add('pc', 'PC1', 100, 460);
+      const pc2 = b.add('pc', 'PC2', 240, 460);
+      const srv = b.add('server', 'SRV1', 620, 460);
+      b.link(r1, 'Gi0/0/0', sw1, 'Gi1/0/24').link(r2, 'Gi0/0/0', sw2, 'Gi1/0/24').link(r1, 'Gi0/0/1', r2, 'Gi0/0/1');
+      b.link(pc1, 'eth0', sw1, 'Gi1/0/1').link(pc2, 'eth0', sw1, 'Gi1/0/2').link(srv, 'eth0', sw2, 'Gi1/0/1');
+      const address: [typeof r1, string, string][] = [
+        [r1, 'Gi0/0/0', '2001:db8:1::1/64'],
+        [r1, 'Gi0/0/1', '2001:db8:12::1/64'],
+        [r2, 'Gi0/0/0', '2001:db8:2::1/64'],
+        [r2, 'Gi0/0/1', '2001:db8:12::2/64'],
+      ];
+      for (const [router, name, cidr] of address) {
+        const port = portByName(router, name);
+        port.shutdown = false;
+        port.ipv6 = [cidr];
+      }
+      r1.ipv6Routing = true;
+      r2.ipv6Routing = true;
+      for (const pc of [pc1, pc2]) pc.ports[0].dhcp = false;
+      const srvPort = srv.ports[0];
+      srvPort.ipv6 = ['2001:db8:2::10/64'];
+      srvPort.gateway6 = '2001:db8:2::1';
+      return b.net;
+    },
+    checks: [
+      check('c1', ['R1 zna sieć 2001:db8:2::/64 z OSPFv3', 'R1 knows 2001:db8:2::/64 from OSPFv3'], ['ipv6 ospf 1 area 0 na obu interfejsach obu routerów i router-id w ipv6 router ospf 1.', 'ipv6 ospf 1 area 0 on both interfaces of both routers and a router-id under ipv6 router ospf 1.'], (c) => {
+        const r1 = c.device('R1');
+        return Boolean(r1 && c.sim.topo.lookup6(r1, parseIpv6('2001:db8:2::10')!)?.route.code === 'O');
+      }),
+      check('c2', ['R2 zna sieć 2001:db8:1::/64 z OSPFv3', 'R2 knows 2001:db8:1::/64 from OSPFv3'], ['Sieć biura musi być w OSPFv3 na R1 (interfejs Gi0/0/0).', 'The office network must be in OSPFv3 on R1 (interface Gi0/0/0).'], (c) => {
+        const r2 = c.device('R2');
+        return Boolean(r2 && c.sim.topo.lookup6(r2, parseIpv6('2001:db8:1::10')!)?.route.code === 'O');
+      }),
+      check('c3', ['PC1 dostaje DNS 2001:db8:2::10 z DHCPv6', 'PC1 gets DNS 2001:db8:2::10 from DHCPv6'], ['Pula z dns-server, ipv6 dhcp server na Gi0/0/0 i flaga O albo M.', 'A pool with dns-server, ipv6 dhcp server on Gi0/0/0 and the O or M flag.'], (c) => {
+        const pc1 = c.device('PC1');
+        return Boolean(pc1 && c.sim.topo.ip6Ifs(pc1).some((i) => i.dns6 === parseIpv6('2001:db8:2::10')));
+      }),
+      check('c4', ['PC1 pinguje SRV1 (2001:db8:2::10)', 'PC1 pings SRV1 (2001:db8:2::10)'], ['Ruch wraca tylko wtedy, gdy oba routery znają obie sieci.', 'Traffic returns only when both routers know both networks.'], (c) => c.ping('PC1', '2001:db8:2::10')),
+    ],
+  },
 ];

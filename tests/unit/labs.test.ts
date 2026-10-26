@@ -174,6 +174,17 @@ SOLUTIONS['ipv6-trasy'] = (sim) => {
   cli(sim, 'R2', ['ipv6 route 2001:db8:1::/64 2001:db8:12::1']);
 };
 
+SOLUTIONS['ipv6-ospf-dhcp'] = (sim) => {
+  cli(sim, 'R1', ['ipv6 router ospf 1', 'router-id 1.1.1.1', 'int g0/0/0', 'ipv6 ospf 1 area 0', 'int g0/0/1', 'ipv6 ospf 1 area 0', 'exit', 'ipv6 dhcp pool BIURO6', 'dns-server 2001:db8:2::10', 'domain-name firma.lan', 'int g0/0/0', 'ipv6 dhcp server BIURO6', 'ipv6 nd other-config-flag']);
+  cli(sim, 'R2', ['ipv6 router ospf 1', 'router-id 2.2.2.2', 'int g0/0/0', 'ipv6 ospf 1 area 0', 'int g0/0/1', 'ipv6 ospf 1 area 0']);
+};
+
+SOLUTIONS['vpn-ipsec'] = (sim) => {
+  const side = (key: string, local: string, peer: string, inside: string) => [`crypto isakmp key ${key} address ${peer}`, 'crypto ipsec profile VPN', 'exit', 'interface Tunnel0', `ip address ${inside} 255.255.255.252`, `tunnel source ${local}`, 'tunnel mode ipsec ipv4', `tunnel destination ${peer}`, 'tunnel protection ipsec profile VPN', 'exit'];
+  cli(sim, 'R1', [...side('Oddzialy2026', 'g0/0/1', '198.51.100.1', '10.255.0.1'), 'ip route 192.168.2.0 255.255.255.0 10.255.0.2']);
+  cli(sim, 'R2', [...side('Oddzialy2026', 'g0/0/1', '203.0.113.1', '10.255.0.2'), 'ip route 192.168.1.0 255.255.255.0 10.255.0.1']);
+};
+
 SOLUTIONS.egzamin = (sim) => {
   cli(sim, 'SW1', ['vlan 10', 'vlan 20', 'int g1/0/1', 'switchport access vlan 10', 'int g1/0/2', 'switchport access vlan 20', 'int g1/0/24', 'switchport mode trunk']);
   cli(sim, 'R1', [

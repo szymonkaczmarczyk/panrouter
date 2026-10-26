@@ -1,14 +1,16 @@
-import { CircleCheck, RotateCcw, Shuffle } from 'lucide-preact';
+import { CalendarClock, CircleCheck, RotateCcw, Shuffle } from 'lucide-preact';
 import { useEffect } from 'preact/hooks';
 import { setMeta } from '../app/meta';
 import { href } from '../app/router';
 import { LEVELS, modulesOfLevel } from '../content';
 import { plural, t, tr, tx } from '../i18n';
 import { progress } from '../state/progress';
+import { dueCount, nextReviewText } from '../state/reviewStatus';
 
 export function QuizHub() {
   useEffect(() => setMeta(tx('Quizy', 'Quizzes'), tx('Quizy z każdego modułu, szybki miks i powtórka błędów.', 'Quizzes for every module, a quick mix and a mistake review.')), []);
   const p = progress.value;
+  const due = dueCount();
   return (
     <div class="page fade-in">
       <header class="page-head">
@@ -21,6 +23,13 @@ export function QuizHub() {
           <Shuffle aria-hidden="true" class="bento-icon" />
           <h4>{tx('Szybki miks', 'Quick mix')}</h4>
           <p class="muted small">{tx('10 losowych pytań z modułów, które już zacząłeś lub zaczęłaś.', '10 random questions from the modules you have started.')}</p>
+        </a>
+        <a class="card card-link stack" href={href('/powtorki')}>
+          <CalendarClock aria-hidden="true" class="bento-icon" />
+          <h4>
+            {tx('Powtórki na dziś', 'Reviews for today')} {due > 0 && <span class="badge badge-warn">{due}</span>}
+          </h4>
+          <p class="muted small">{due ? tx('Pytania i hasła, które wracają po 1, 3 i 7 dniach. Zrób je dziś, żeby zostały w pamięci.', 'Questions and terms that come back after 1, 3 and 7 days. Do them today so they stick.') : nextReviewText()}</p>
         </a>
         <a class="card card-link stack" href={href('/quiz/powtorka')}>
           <RotateCcw aria-hidden="true" class="bento-icon" />

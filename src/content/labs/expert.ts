@@ -1,5 +1,7 @@
 import { l } from '../../i18n/l10n';
 import { NetBuilder } from '../../sim/builder';
+import { parseIp } from '../../sim/ip';
+import type { VirtualIf } from '../../sim/types';
 import type { Lab, LabContext } from '../types';
 import { check } from './basic';
 
@@ -16,6 +18,15 @@ function vrrpActive(c: LabContext, name: string): boolean {
   const device = c.device(name);
   const entry = device && c.sim.topo.l3If(device, 'GigabitEthernet0/0/0');
   return Boolean(device && entry && c.sim.topo.fhrpOf(device, entry)?.active);
+}
+
+function viaTunnel(c: LabContext, router: string, target: string): boolean {
+  const device = c.device(router);
+  const ip = parseIp(target);
+  if (!device || ip === null) return false;
+  const found = c.sim.topo.lookup(device, ip);
+  const exit = found && c.sim.topo.l3If(device, found.ifName);
+  return Boolean(exit && exit.attach.kind === 'tunnel' && exit.up && (exit.cfg as VirtualIf).tunnelMode === 'ipsec');
 }
 
 export const EXPERT_LABS: Lab[] = [
@@ -339,6 +350,102 @@ export const EXPERT_LABS: Lab[] = [
         return Boolean(pc && f.sim.dhcpRenew(pc.id).apipa);
       }),
       check('c5', ['PC1 pinguje bramę 192.168.60.1', 'PC1 pings gateway 192.168.60.1'], ['Brama przychodzi z DHCP razem z adresem.', 'The gateway comes from DHCP together with the address.'], (c) => c.ping('PC1', '192.168.60.1')),
+    ],
+  },
+  {
+    id: 'vpn-ipsec',
+    level: 5,
+    minutes: 30,
+    title: l('VPN IPsec między oddziałami', 'IPsec VPN between branches'),
+    summary: l('Dwa oddziały mają prywatne sieci, a dostawca internetu ich nie zna. Zestaw szyfrowany tunel IPsec i poprowadź nim ruch.', 'Two branches have private networks that the internet provider does not know. Build an encrypted IPsec tunnel and route traffic through it.'),
+    goals: [l('Konfigurować tunel VTI z IPsec', 'Configure a VTI tunnel with IPsec'), l('Rozumieć, co widać po drodze w ruchu szyfrowanym', 'Understand what is visible on the way in encrypted traffic')],
+    steps: {
+      pl: [
+        { t: 'p', text: 'Oddział A (R1) ma sieć 192.168.1.0/24, oddział B (R2) sieć 192.168.2.0/24 z serwerem SRV2 (192.168.2.10). Oba routery mają publiczne adresy u dostawcy (ISP) i trasę domyślną do niego. ISP nie przepuści prywatnych adresów, więc PC1 nie widzi SRV2.' },
+        {
+          t: 'code',
+          lines: [
+            'R1(config)# crypto isakmp key Oddzialy2026 address 198.51.100.1',
+            'R1(config)# crypto ipsec profile VPN',
+            'R1(ipsec-profile)# exit',
+            'R1(config)# interface Tunnel0',
+            'R1(config-if)# ip address 10.255.0.1 255.255.255.252',
+            'R1(config-if)# tunnel source g0/0/1',
+            'R1(config-if)# tunnel mode ipsec ipv4',
+            'R1(config-if)# tunnel destination 198.51.100.1',
+            'R1(config-if)# tunnel protection ipsec profile VPN',
+            'R1(config-if)# exit',
+            'R1(config)# ip route 192.168.2.0 255.255.255.0 10.255.0.2',
+          ],
+          caption: 'Klucz (pre-shared key) musi być identyczny po obu stronach. Tunel ma własną małą sieć 10.255.0.0/30.',
+        },
+        {
+          t: 'list',
+          ordered: true,
+          items: [
+            'Na R2 zrób lustrzaną konfigurację: klucz dla 203.0.113.1, Tunnel0 z adresem 10.255.0.2, cel 203.0.113.1 i trasa do 192.168.1.0/24 przez 10.255.0.1.',
+            'Na R1 sprawdź `show ip interface brief` (Tunnel0 ma być up/up) i `show crypto isakmp sa`.',
+            'Z PC1 wyślij ping do 192.168.2.10, a potem w trybie symulacji otwórz analizator (klawisz A). Między routerami a ISP zobaczysz tylko ESP z adresami routerów.',
+          ],
+        },
+        { t: 'callout', kind: 'warn', text: 'Gdy klucze się różnią, tunel zostaje w stanie down, a show crypto isakmp sa pokazuje MM_KEY_EXCH. W prawdziwej sieci to najczęstsza przyczyna niedziałającego VPN.' },
+      ],
+      en: [
+        { t: 'p', text: 'Branch A (R1) has 192.168.1.0/24 and branch B (R2) has 192.168.2.0/24 with server SRV2 (192.168.2.10). Both routers have public addresses at the provider (ISP) and a default route to it. The ISP will not carry private addresses, so PC1 cannot see SRV2.' },
+        {
+          t: 'code',
+          lines: [
+            'R1(config)# crypto isakmp key Oddzialy2026 address 198.51.100.1',
+            'R1(config)# crypto ipsec profile VPN',
+            'R1(ipsec-profile)# exit',
+            'R1(config)# interface Tunnel0',
+            'R1(config-if)# ip address 10.255.0.1 255.255.255.252',
+            'R1(config-if)# tunnel source g0/0/1',
+            'R1(config-if)# tunnel mode ipsec ipv4',
+            'R1(config-if)# tunnel destination 198.51.100.1',
+            'R1(config-if)# tunnel protection ipsec profile VPN',
+            'R1(config-if)# exit',
+            'R1(config)# ip route 192.168.2.0 255.255.255.0 10.255.0.2',
+          ],
+          caption: 'The pre-shared key must be identical on both sides. The tunnel has its own small network 10.255.0.0/30.',
+        },
+        {
+          t: 'list',
+          ordered: true,
+          items: [
+            'Mirror the configuration on R2: the key for 203.0.113.1, Tunnel0 with 10.255.0.2, destination 203.0.113.1 and a route to 192.168.1.0/24 via 10.255.0.1.',
+            'On R1 check `show ip interface brief` (Tunnel0 must be up/up) and `show crypto isakmp sa`.',
+            'Ping 192.168.2.10 from PC1, then open the analyzer in simulation mode (key A). Between the routers and the ISP you will see only ESP with router addresses.',
+          ],
+        },
+        { t: 'callout', kind: 'warn', text: 'When the keys differ, the tunnel stays down and show crypto isakmp sa shows MM_KEY_EXCH. In real networks this is the most common reason a VPN does not work.' },
+      ],
+    },
+    build: () => {
+      const b = new NetBuilder();
+      const pc1 = b.add('pc', 'PC1', 80, 300);
+      const r1 = b.add('router', 'R1', 260, 300);
+      const isp = b.add('router', 'ISP', 440, 160);
+      const r2 = b.add('router', 'R2', 620, 300);
+      const srv = b.add('server', 'SRV2', 800, 300);
+      b.link(pc1, 'eth0', r1, 'Gi0/0/0').link(r1, 'Gi0/0/1', isp, 'Gi0/0/0').link(isp, 'Gi0/0/1', r2, 'Gi0/0/1').link(r2, 'Gi0/0/0', srv, 'eth0');
+      b.ip(r1, 'Gi0/0/0', '192.168.1.1/24').ip(r1, 'Gi0/0/1', '203.0.113.1/30');
+      b.ip(isp, 'Gi0/0/0', '203.0.113.2/30').ip(isp, 'Gi0/0/1', '198.51.100.2/30');
+      b.ip(r2, 'Gi0/0/1', '198.51.100.1/30').ip(r2, 'Gi0/0/0', '192.168.2.1/24');
+      b.host(pc1, '192.168.1.10/24', '192.168.1.1').host(srv, '192.168.2.10/24', '192.168.2.1');
+      r1.routes.push({ net: '0.0.0.0', prefix: 0, via: '203.0.113.2', iface: '', ad: 1 });
+      r2.routes.push({ net: '0.0.0.0', prefix: 0, via: '198.51.100.2', iface: '', ad: 1 });
+      return b.net;
+    },
+    checks: [
+      check('c1', ['Tunnel0 na R1 działa w trybie IPsec', 'Tunnel0 on R1 is up in IPsec mode'], ['Ten sam klucz po obu stronach, tunnel mode ipsec ipv4 i tunnel protection ipsec profile.', 'The same key on both sides, tunnel mode ipsec ipv4 and tunnel protection ipsec profile.'], (c) => {
+        const r1 = c.device('R1');
+        const tunnel = r1?.vifs.find((v) => v.kind === 'tunnel' && v.tunnelMode === 'ipsec');
+        return Boolean(r1 && tunnel && c.sim.topo.l3If(r1, tunnel.name)?.up);
+      }),
+      check('c2', ['R1 wysyła ruch do 192.168.2.0/24 przez tunel', 'R1 sends traffic for 192.168.2.0/24 through the tunnel'], ['Trasa statyczna do sieci oddziału B przez adres drugiego końca tunelu.', 'A static route to branch B through the far end of the tunnel.'], (c) => viaTunnel(c, 'R1', '192.168.2.10')),
+      check('c3', ['R2 odsyła ruch do 192.168.1.0/24 przez tunel', 'R2 sends traffic for 192.168.1.0/24 back through the tunnel'], ['Bez trasy powrotnej odpowiedź nie wróci.', 'Without a return route the reply cannot come back.'], (c) => viaTunnel(c, 'R2', '192.168.1.10')),
+      check('c4', ['PC1 pinguje SRV2 (192.168.2.10)', 'PC1 pings SRV2 (192.168.2.10)'], ['Pierwsze pakiety mogą zginąć, zanim routery poznają adresy MAC.', 'The first packets may be lost while routers learn MAC addresses.'], (c) => c.ping('PC1', '192.168.2.10')),
     ],
   },
 ];

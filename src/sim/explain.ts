@@ -3,6 +3,14 @@ import { formatMacColon } from './ip';
 import type { Explain } from './types';
 
 const TEXT: Record<string, { pl: string; en: string }> = {
+  'tunnel.decap': { pl: 'Pakiet GRE od {ip} pasuje do {iface}. Router zdejmuje zewnętrzny nagłówek i dalej obsługuje pakiet ze środka.', en: 'The GRE packet from {ip} matches {iface}. The router strips the outer header and handles the inner packet.' },
+  'tunnel.decrypt': { pl: 'Pakiet ESP od {ip} pasuje do skojarzenia IPsec na {iface}. Router sprawdza integralność, odszyfrowuje go i dalej obsługuje pakiet ze środka.', en: 'The ESP packet from {ip} matches the IPsec association on {iface}. The router checks integrity, decrypts it and handles the inner packet.' },
+  'tunnel.down': { pl: 'Interfejs {iface} jest wyłączony albo tunel nie zestawił się, więc pakiet ginie.', en: 'Interface {iface} is down or the tunnel did not come up, so the packet is dropped.' },
+  'tunnel.encap': { pl: 'Trasa prowadzi przez {iface}. Router pakuje pakiet w nagłówek GRE i nowy nagłówek IP: od {src} do {dst}. GRE niczego nie szyfruje.', en: 'The route points to {iface}. The router wraps the packet in GRE and a new IP header from {src} to {dst}. GRE encrypts nothing.' },
+  'tunnel.encrypt': { pl: 'Trasa prowadzi przez {iface}. Router szyfruje cały pakiet (ESP) i wkłada go w nowy nagłówek IP: od {src} do {dst}. Po drodze widać tylko adresy routerów.', en: 'The route points to {iface}. The router encrypts the whole packet (ESP) and puts it in a new IP header from {src} to {dst}. On the way only the router addresses are visible.' },
+  'tunnel.noMatch': { pl: 'Przyszedł pakiet GRE od {ip}, ale żaden tunel tu go nie oczekuje. Router go odrzuca.', en: 'A GRE packet from {ip} arrived, but no tunnel here expects it. The router drops it.' },
+  'tunnel.noSa': { pl: 'Przyszedł pakiet ESP od {ip}, ale nie ma dla niego skojarzenia IPsec (inny klucz albo brak tunelu). Router go odrzuca.', en: 'An ESP packet from {ip} arrived, but there is no IPsec association for it (different key or no tunnel). The router drops it.' },
+  'tunnel.recursive': { pl: 'Trasa do końca tunelu {ip} prowadzi przez sam tunel {iface}. To pętla rekursywna, więc pakiet ginie.', en: 'The route to tunnel end {ip} goes through tunnel {iface} itself. That is recursive routing, so the packet is dropped.' },
   'acl.deny': {
     pl: 'Lista ACL {acl} ({dir}) na {iface} odrzuca ten pakiet. Router odsyła informację, że komunikacja jest zablokowana.',
     en: 'ACL {acl} ({dir}) on {iface} denies this packet. The router reports that communication is administratively prohibited.',

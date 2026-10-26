@@ -1,4 +1,4 @@
-import { Cable, Copy, Download, FolderOpen, Hand, ImageDown, LayoutTemplate, Library, Link2, Mail, Maximize, MousePointer2, Redo2, StickyNote, Trash2, Undo2, Upload, ZoomIn, ZoomOut } from 'lucide-preact';
+import { Cable, Copy, Download, FolderOpen, GraduationCap, Hand, ImageDown, LayoutTemplate, Library, Link2, Mail, Maximize, MousePointer2, Redo2, StickyNote, Trash2, Undo2, Upload, ZoomIn, ZoomOut } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { tr, tx } from '../../i18n';
@@ -13,18 +13,22 @@ import { Canvas, stepTimes, type View } from './Canvas';
 import type { CableChoice, SimController, Tool } from './controller';
 import { DevicePanel } from './DevicePanel';
 import { renderNetworkPng } from './exportImage';
+import { LabBuilder } from './LabBuilder';
 import { NetworkLibrary } from './NetworkLibrary';
 import { EventPanel } from './EventPanel';
 import { Palette } from './Palette';
 
-export function fitView(net: Network, width: number, height: number): View {
+const HINT_SPACE = 56;
+
+export function fitView(net: Network, width: number, height: number, top = 0): View {
   if (!net.devices.length && !net.notes.length) return { x: -60, y: -40, zoom: 1 };
   const minX = Math.min(...net.devices.map((d) => d.x - 90), ...net.notes.map((n) => n.x - 20));
   const maxX = Math.max(...net.devices.map((d) => d.x + 90), ...net.notes.map((n) => n.x + 210));
   const minY = Math.min(...net.devices.map((d) => d.y - 80), ...net.notes.map((n) => n.y - 20));
   const maxY = Math.max(...net.devices.map((d) => d.y + 110), ...net.notes.map((n) => n.y + 170));
-  const zoom = Math.min(1.4, Math.max(0.4, Math.min(width / (maxX - minX), height / (maxY - minY))));
-  return { zoom, x: (minX + maxX) / 2 - width / zoom / 2, y: (minY + maxY) / 2 - height / zoom / 2 };
+  const usable = height - top;
+  const zoom = Math.min(1.4, Math.max(0.4, Math.min(width / (maxX - minX), usable / (maxY - minY))));
+  return { zoom, x: (minX + maxX) / 2 - width / zoom / 2, y: (minY + maxY) / 2 - usable / zoom / 2 - top / zoom };
 }
 
 const TOOLS: { id: Tool; key: string; icon: typeof Hand; label: [string, string] }[] = [
@@ -41,9 +45,10 @@ interface Props {
   locked?: boolean;
   leading?: ComponentChildren;
   side?: ComponentChildren;
+  overlay?: ComponentChildren;
 }
 
-export function Workspace({ ctrl, allowFiles = false, locked = false, leading, side }: Props) {
+export function Workspace({ ctrl, allowFiles = false, locked = false, leading, side, overlay }: Props) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>({ x: -60, y: -40, zoom: 1 });
   const [menu, setMenu] = useState(false);
@@ -51,6 +56,7 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
   const [editingNote, setEditingNote] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [library, setLibrary] = useState(false);
+  const [labBuilder, setLabBuilder] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const mode = ctrl.mode.value;
   const tool = ctrl.tool.value;
@@ -59,14 +65,18 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
     const el = canvasRef.current;
     if (!el) return;
     const palette = el.querySelector<HTMLElement>('.palette');
-    const reserved = palette ? palette.offsetHeight + 24 : 0;
-    setView(fitView(ctrl.net, el.clientWidth, el.clientHeight - reserved));
+    const sheet = el.parentElement?.querySelector<HTMLElement>('.event-panel, .device-panel');
+    const sheetCover = sheet && getComputedStyle(sheet).position === 'fixed' ? el.getBoundingClientRect().bottom - sheet.getBoundingClientRect().top + 24 : 0;
+    const reserved = Math.max(palette && palette.offsetParent ? palette.offsetHeight + 24 : 0, sheetCover);
+    const hint = el.querySelector<HTMLElement>('.canvas-hint');
+    const top = Math.max(HINT_SPACE, hint ? hint.offsetTop + hint.offsetHeight + 12 : 0);
+    setView(fitView(ctrl.net, el.clientWidth, el.clientHeight - reserved, top));
   };
 
   useEffect(() => {
     const id = window.setTimeout(fit, 30);
     return () => window.clearTimeout(id);
-  }, [ctrl, ctrl.net]);
+  }, [ctrl, ctrl.net, mode]);
 
   const setTool = (next: Tool) => {
     ctrl.tool.value = next;
@@ -354,6 +364,18 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
                   <Link2 aria-hidden="true" />
                   <span>{tx('Kopiuj link do tej sieci', 'Copy a link to this network')}</span>
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(false);
+                    if (!ctrl.net.devices.length) return toast(tx('Plansza jest pusta. Zbuduj sieć, z której ma powstać laboratorium.', 'The canvas is empty. Build the network the lab should use.'), 'warn');
+                    setLabBuilder(true);
+                  }}
+                >
+                  <GraduationCap aria-hidden="true" />
+                  <span>{tx('Zrób z tej sieci laboratorium', 'Turn this network into a lab')}</span>
+                </button>
                 <button type="button" role="menuitem" onClick={() => void savePng()}>
                   <ImageDown aria-hidden="true" />
                   <span>{tx('Zapisz obraz planszy (PNG)', 'Save canvas image (PNG)')}</span>
@@ -381,6 +403,7 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
               {hint}
             </div>
           )}
+          {overlay}
           {ctrl.net.devices.length === 0 && !ctrl.placing.value && (
             <div class="canvas-empty">
               <strong>{tx('Plansza jest pusta', 'The canvas is empty')}</strong>
@@ -450,6 +473,7 @@ export function Workspace({ ctrl, allowFiles = false, locked = false, leading, s
           <p class="small dim">{tx('Ctrl+Enter zapisuje. Notatki trafiają też do pliku, linku i obrazu PNG.', 'Ctrl+Enter saves. Notes are included in the file, link and PNG image.')}</p>
         </Dialog>
       )}
+      {labBuilder && <LabBuilder net={ctrl.net} onClose={() => setLabBuilder(false)} />}
       {library && <NetworkLibrary ctrl={ctrl} onClose={() => setLibrary(false)} onOpened={() => window.setTimeout(fit, 30)} />}
       {shareLink && (
         <Dialog

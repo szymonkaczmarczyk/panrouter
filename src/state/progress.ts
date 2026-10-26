@@ -1,5 +1,6 @@
 import { computed, effect, signal } from '@preact/signals';
 import type { Network } from '../sim/types';
+import { cleanReviews, dayOf, questionKey, scheduleAgain, schedulePassed, termKey, type Reviews } from './reviews';
 
 const STORAGE_KEY = 'panrouter:v1';
 export const SAVED_LIMIT = 30;
@@ -24,6 +25,17 @@ export interface IncidentRun {
   revealed: boolean;
 }
 
+export const EXAM_HISTORY_LIMIT = 30;
+
+export interface ExamAttempt {
+  at: string;
+  theory: number;
+  practical: number;
+  total: number;
+  passed: boolean;
+  modules: Record<string, [number, number]>;
+}
+
 export interface Progress {
   version: 1;
   sections: Record<string, string[]>;
@@ -31,13 +43,16 @@ export interface Progress {
   labs: Record<string, { best: number; done: boolean }>;
   games: Record<string, { best: number; plays: number }>;
   exam: { attempts: number; best: number; passed: boolean; theory: number; practical: number };
+  examHistory: ExamAttempt[];
   mistakes: string[];
+  reviews: Reviews;
   streak: { days: number; last: string };
   sandbox: Network | null;
   savedNets: SavedNet[];
   incident: IncidentRun | null;
   incidents: { solved: number; clean: number };
   labNets: Record<string, Network>;
+  simTour: boolean;
   settings: { motion: 'system' | 'reduce'; terminalFont: number; showPorts: boolean; showIps: boolean };
 }
 
@@ -49,13 +64,16 @@ function blank(): Progress {
     labs: {},
     games: {},
     exam: { attempts: 0, best: 0, passed: false, theory: 0, practical: 0 },
+    examHistory: [],
     mistakes: [],
+    reviews: {},
     streak: { days: 0, last: '' },
     sandbox: null,
     savedNets: [],
     incident: null,
     incidents: { solved: 0, clean: 0 },
     labNets: {},
+    simTour: false,
     settings: { motion: 'system', terminalFont: 14, showPorts: false, showIps: true },
   };
 }
@@ -84,6 +102,24 @@ function cleanIncident(value: unknown): IncidentRun | null {
   return valid ? { ...run, hints: Math.max(0, Math.min(2, Number(run.hints) || 0)), revealed: Boolean(run.revealed) } : null;
 }
 
+const percentOf = (value: unknown) => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+
+export function cleanExamHistory(value: unknown): ExamAttempt[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((a): a is ExamAttempt => Boolean(a) && typeof a.at === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(a.at))
+    .slice(-EXAM_HISTORY_LIMIT)
+    .map((a) => {
+      const modules: Record<string, [number, number]> = {};
+      for (const [id, pair] of Object.entries(a.modules && typeof a.modules === 'object' ? a.modules : {}).slice(0, 40)) {
+        if (!/^[a-z0-9-]{1,40}$/.test(id) || !Array.isArray(pair)) continue;
+        const asked = Math.max(0, Math.floor(Number(pair[0]) || 0));
+        modules[id] = [asked, Math.min(asked, Math.max(0, Math.floor(Number(pair[1]) || 0)))];
+      }
+      return { at: a.at, theory: percentOf(a.theory), practical: percentOf(a.practical), total: percentOf(a.total), passed: a.passed === true, modules };
+    });
+}
+
 function cleanIncidentStats(value: unknown): Progress['incidents'] {
   const stats = value as Progress['incidents'] | null;
   const solved = Math.max(0, Math.floor(Number(stats?.solved) || 0));
@@ -97,7 +133,7 @@ function load(): Progress {
     const parsed = JSON.parse(raw) as Partial<Progress>;
     if (parsed.version !== 1) return blank();
     const base = blank();
-    return { ...base, ...parsed, savedNets: cleanSaved(parsed.savedNets), incident: cleanIncident(parsed.incident), incidents: cleanIncidentStats(parsed.incidents), exam: { ...base.exam, ...parsed.exam }, settings: { ...base.settings, ...parsed.settings }, streak: { ...base.streak, ...parsed.streak } };
+    return { ...base, ...parsed, reviews: cleanReviews(parsed.reviews), examHistory: cleanExamHistory(parsed.examHistory), simTour: parsed.simTour === true, savedNets: cleanSaved(parsed.savedNets), incident: cleanIncident(parsed.incident), incidents: cleanIncidentStats(parsed.incidents), exam: { ...base.exam, ...parsed.exam }, settings: { ...base.settings, ...parsed.settings }, streak: { ...base.streak, ...parsed.streak } };
   } catch {
     return blank();
   }
@@ -128,9 +164,8 @@ export function update(mutator: (draft: Progress) => void): void {
   progress.value = draft;
 }
 
-function today(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+export function today(): string {
+  return dayOf(new Date());
 }
 
 function touchStreak(draft: Progress): void {
@@ -138,7 +173,7 @@ function touchStreak(draft: Progress): void {
   if (draft.streak.last === day) return;
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-  const y = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+  const y = dayOf(yesterday);
   draft.streak = { days: draft.streak.last === y ? draft.streak.days + 1 : 1, last: day };
 }
 
@@ -158,7 +193,25 @@ export function recordQuiz(id: string, percent: number, wrong: string[], right: 
     for (const q of wrong) set.add(q);
     for (const q of right) set.delete(q);
     d.mistakes = [...set];
+    for (const q of wrong) scheduleAgain(d.reviews, questionKey(q), today());
     touchStreak(d);
+  });
+}
+
+export function recordReview(passed: string[], again: string[]): void {
+  update((d) => {
+    const day = today();
+    for (const key of passed) schedulePassed(d.reviews, key, day);
+    for (const key of again) scheduleAgain(d.reviews, key, day);
+    touchStreak(d);
+  });
+}
+
+export function toggleTermReview(term: string): void {
+  update((d) => {
+    const key = termKey(term);
+    if (d.reviews[key]) delete d.reviews[key];
+    else scheduleAgain(d.reviews, key, today());
   });
 }
 
@@ -178,13 +231,15 @@ export function recordGame(id: string, score: number): void {
   });
 }
 
-export function recordExam(result: { theory: number; practical: number; total: number; passed: boolean }): void {
+export function recordExam(result: { theory: number; practical: number; total: number; passed: boolean; modules: Record<string, [number, number]>; wrong: string[] }): void {
   update((d) => {
     d.exam.attempts += 1;
     d.exam.best = Math.max(d.exam.best, result.total);
     d.exam.theory = result.theory;
     d.exam.practical = result.practical;
     d.exam.passed = d.exam.passed || result.passed;
+    d.examHistory = [...d.examHistory, { at: today(), theory: result.theory, practical: result.practical, total: result.total, passed: result.passed, modules: result.modules }].slice(-EXAM_HISTORY_LIMIT);
+    for (const q of result.wrong) scheduleAgain(d.reviews, questionKey(q), today());
     touchStreak(d);
   });
 }
@@ -242,6 +297,12 @@ export function saveLabNet(id: string, net: Network | null): void {
   });
 }
 
+export function finishSimTour(): void {
+  update((d) => {
+    d.simTour = true;
+  });
+}
+
 export function resetProgress(): void {
   progress.value = blank();
 }
@@ -255,7 +316,7 @@ export function importProgress(text: string): boolean {
     const parsed = JSON.parse(text) as Progress;
     if (parsed.version !== 1 || typeof parsed.sections !== 'object') return false;
     const base = blank();
-    progress.value = { ...base, ...parsed, savedNets: cleanSaved(parsed.savedNets), incident: cleanIncident(parsed.incident), incidents: cleanIncidentStats(parsed.incidents), exam: { ...base.exam, ...parsed.exam }, settings: { ...base.settings, ...parsed.settings } };
+    progress.value = { ...base, ...parsed, reviews: cleanReviews(parsed.reviews), examHistory: cleanExamHistory(parsed.examHistory), simTour: parsed.simTour === true, savedNets: cleanSaved(parsed.savedNets), incident: cleanIncident(parsed.incident), incidents: cleanIncidentStats(parsed.incidents), exam: { ...base.exam, ...parsed.exam }, settings: { ...base.settings, ...parsed.settings } };
     return true;
   } catch {
     return false;

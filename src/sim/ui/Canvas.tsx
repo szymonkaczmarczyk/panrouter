@@ -29,6 +29,8 @@ export const PROTO_COLOR: Record<string, string> = {
   UDP: 'var(--proto-udp)',
   ICMPv6: 'var(--proto-icmp)',
   NDP: 'var(--proto-arp)',
+  ESP: 'var(--proto-esp)',
+  GRE: 'var(--proto-esp)',
 };
 
 function primaryIp(ctrl: SimController, device: Device): string {

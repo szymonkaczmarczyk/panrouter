@@ -136,7 +136,7 @@ function IncidentPanel({ run, ctrl, onClose }: { run: IncidentRun; ctrl: SimCont
         <p class="muted small">{tx(`W sieci są usterki: ${run.faults.length}. Znajdź je w CLI i panelach urządzeń, a potem sprawdź naprawę.`, `There are ${run.faults.length} faults in the network. Find them in the CLI and device panels, then check your fix.`)}</p>
       </div>
       <div class="lab-side-body">
-        <section aria-live="polite">
+        <section class="incident-results" aria-live="polite">
           <strong class="small">{results ? tx('Wynik sprawdzenia', 'Check result') : tx('Objawy', 'Symptoms')}</strong>
           <ul class="check-list">
             {(results ? run.tests : symptoms).map((test) => {

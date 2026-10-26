@@ -4,11 +4,17 @@ import { eui64, inSubnet6, isLinkLocal, linkLocal, network6, parseCidr6, parseIp
 import { blankPort, findDevice, isHost } from './network';
 import type { Device, FhrpProto, Link, LinkEnd, NatRole, Network, Port, VirtualIf } from './types';
 
+export interface TunnelPeer {
+  device: Device;
+  vif: VirtualIf;
+}
+
 export type L3Attach =
   | { kind: 'port'; port: string }
   | { kind: 'sub'; port: string; vlan: number }
   | { kind: 'svi'; vlan: number }
-  | { kind: 'loop' };
+  | { kind: 'loop' }
+  | { kind: 'tunnel' };
 
 export interface L3If {
   name: string;
@@ -90,7 +96,7 @@ export interface FhrpState {
 export interface Addr6 {
   addr: bigint;
   prefix: number;
-  origin: 'static' | 'slaac' | 'link-local';
+  origin: 'static' | 'slaac' | 'dhcpv6' | 'link-local';
 }
 
 export interface Ip6If {
@@ -98,14 +104,25 @@ export interface Ip6If {
   linkLocal: bigint;
   addrs: Addr6[];
   router: bigint | null;
+  dns6: bigint | null;
+}
+
+export interface Ospf6Neighbor {
+  routerId: string;
+  peerDev: string;
+  address: bigint;
+  ifName: string;
+  peerIf: string;
+  state: 'FULL/DR' | 'FULL/BDR' | 'FULL/DROTHER';
 }
 
 export interface Route6 {
-  code: 'C' | 'L' | 'S' | 'ND';
+  code: 'C' | 'L' | 'S' | 'ND' | 'O' | 'OE2';
   net: bigint;
   prefix: number;
   via: bigint | null;
   ifName: string;
+  metric?: number;
 }
 
 export const RADIO_PREFIX = 'Radio:';
@@ -173,6 +190,7 @@ export class Topology {
   private fhrpCache: Map<string, FhrpState> | null = null;
   private ip6Cache = new Map<string, Ip6If[]>();
   private route6Cache = new Map<string, Route6[]>();
+  private ospf6Cache: { routes: Map<string, Route6[]>; neighbors: Map<string, Ospf6Neighbor[]> } | null = null;
 
   constructor(net: Network) {
     this.net = net;
@@ -477,6 +495,18 @@ export class Topology {
           nat: vif.nat,
           zone: '',
         });
+      } else if (vif.kind === 'tunnel') {
+        list.push({
+          name: vif.name,
+          cfg: vif,
+          ip: parseIp(vif.ip),
+          prefix: vif.prefix,
+          mac: device.baseMac,
+          attach: { kind: 'tunnel' },
+          up: this.tunnelUp(device, vif),
+          nat: vif.nat,
+          zone: '',
+        });
       } else {
         list.push({
           name: vif.name,
@@ -493,6 +523,44 @@ export class Topology {
     }
     this.l3Cache.set(device.id, list);
     return list;
+  }
+
+  tunnelSourceIp(device: Device, vif: VirtualIf): number | null {
+    const port = device.ports.find((p) => p.name === vif.tunnelSource);
+    if (port) return !port.switchport && this.portUp(device, port.name) ? parseIp(port.ip) : null;
+    const source = device.vifs.find((v) => v.name === vif.tunnelSource && v.kind !== 'tunnel');
+    return source && !source.shutdown ? parseIp(source.ip) : null;
+  }
+
+  tunnelPeer(device: Device, vif: VirtualIf): TunnelPeer | null {
+    const src = this.tunnelSourceIp(device, vif);
+    const dst = parseIp(vif.tunnelDest);
+    if (src === null || dst === null) return null;
+    for (const other of this.net.devices) {
+      if (other.id === device.id || !this.isPowered(other)) continue;
+      for (const candidate of other.vifs) {
+        if (candidate.kind !== 'tunnel' || candidate.shutdown || candidate.tunnelMode !== vif.tunnelMode) continue;
+        if (parseIp(candidate.tunnelDest) !== src || this.tunnelSourceIp(other, candidate) !== dst) continue;
+        return { device: other, vif: candidate };
+      }
+    }
+    return null;
+  }
+
+  ipsecReady(device: Device, vif: VirtualIf, peer: TunnelPeer): boolean {
+    const keyFor = (owner: Device, address: string) => owner.cryptoKeys.find((k) => k.peer === address)?.key;
+    const protectedBy = (owner: Device, tunnel: VirtualIf) => Boolean(tunnel.tunnelProtection) && owner.ipsecProfiles.includes(tunnel.tunnelProtection);
+    const mine = keyFor(device, vif.tunnelDest);
+    const theirs = keyFor(peer.device, peer.vif.tunnelDest);
+    return Boolean(mine) && mine === theirs && protectedBy(device, vif) && protectedBy(peer.device, peer.vif);
+  }
+
+  tunnelUp(device: Device, vif: VirtualIf): boolean {
+    if (vif.shutdown || !this.isPowered(device)) return false;
+    if (this.tunnelSourceIp(device, vif) === null || parseIp(vif.tunnelDest) === null) return false;
+    if (vif.tunnelMode === 'gre') return true;
+    const peer = this.tunnelPeer(device, vif);
+    return Boolean(peer && this.ipsecReady(device, vif, peer));
   }
 
   l3If(device: Device, name: string): L3If | undefined {
@@ -688,6 +756,7 @@ export class Topology {
         if (parsed && !isLinkLocal(parsed.addr)) addrs.push({ addr: parsed.addr, prefix: parsed.prefix, origin: 'static' });
       }
       let router: bigint | null = null;
+      let dns6: bigint | null = null;
       if (cfg.ipv6Slaac && !this.isRouting6(device)) {
         const reach = this.l2Reach(device, entry);
         for (const key of reach) {
@@ -703,9 +772,17 @@ export class Topology {
             const addr = eui64(prefix.addr, entry.mac);
             if (!addrs.some((a) => a.addr === addr)) addrs.push({ addr, prefix: 64, origin: 'slaac' });
           }
+          const pool = peerIf.cfg.dhcp6Server ? peer.dhcp6Pools.find((p) => p.name === peerIf.cfg.dhcp6Server) : undefined;
+          if (!pool || (!peerIf.cfg.ndManaged && !peerIf.cfg.ndOther)) continue;
+          const leased = peerIf.cfg.ndManaged ? parseCidr6(pool.prefix) : null;
+          if (leased && leased.prefix === 64) {
+            const addr = network6(leased.addr, 64) | dhcp6InterfaceId(entry.mac);
+            if (!addrs.some((a) => a.addr === addr)) addrs.push({ addr, prefix: 128, origin: 'dhcpv6' });
+          }
+          dns6 ??= pool.dns ? parseIpv6(pool.dns) : null;
         }
       }
-      list.push({ entry, linkLocal: ll, addrs, router });
+      list.push({ entry, linkLocal: ll, addrs, router, dns6 });
     }
     return list;
   }
@@ -741,6 +818,10 @@ export class Topology {
         if (!exit && via === null) continue;
         if (!exit && via !== null && isLinkLocal(via)) continue;
         routes.push({ code: 'S', net: network6(net, r.prefix), prefix: r.prefix, via, ifName: exit?.entry.name ?? '' });
+      }
+      for (const learned of this.ospf6().routes.get(device.id) ?? []) {
+        if (routes.some((r) => r.net === learned.net && r.prefix === learned.prefix)) continue;
+        routes.push(learned);
       }
     } else {
       const withGateway = ifs.find((i) => i.entry.cfg.gateway6 && parseIpv6(i.entry.cfg.gateway6) !== null);
@@ -910,6 +991,11 @@ export class Topology {
         for (const port of this.forwardingPorts(dev, attach.vlan)) queue.push({ dev, port: port.name, vlan: this.egressTag(port, attach.vlan) });
       }
     };
+    if (entry.attach.kind === 'tunnel') {
+      const peer = this.tunnelPeer(device, entry.cfg as VirtualIf);
+      if (entry.up && peer && this.tunnelUp(peer.device, peer.vif)) reached.add(`${peer.device.id}|${peer.vif.name}`);
+      return reached;
+    }
     emitFrom(device, entry.attach);
     while (queue.length) {
       const { dev, port, vlan } = queue.shift()!;
@@ -1079,10 +1165,114 @@ export class Topology {
     return this.ospfCache;
   }
 
+  routerId6(device: Device): number {
+    const configured = device.ospf6?.routerId ? parseIp(device.ospf6.routerId) : null;
+    if (configured !== null) return configured;
+    const ifs = this.l3Ifs(device).filter((e) => e.ip !== null && e.up);
+    const loops = ifs.filter((e) => e.attach.kind === 'loop');
+    const pool = loops.length ? loops : ifs;
+    return pool.reduce((max, e) => Math.max(max, e.ip!), 0);
+  }
+
+  ospf6Ifs(device: Device): { i: Ip6If; area: number; passive: boolean; cost: number }[] {
+    const ospf6 = device.ospf6;
+    if (!ospf6 || !this.isRouting6(device)) return [];
+    return this.ip6Ifs(device)
+      .filter((i) => i.entry.cfg.ospf6Pid === ospf6.processId)
+      .map((i) => {
+        const speed = i.entry.attach.kind === 'port' || i.entry.attach.kind === 'sub' ? this.linkSpeed(device, i.entry.attach.port) : 1000;
+        return {
+          i,
+          area: i.entry.cfg.ospf6Area,
+          passive: ospf6.passive.includes(i.entry.name) || i.entry.attach.kind === 'loop',
+          cost: i.entry.attach.kind === 'loop' ? 1 : ospfCost(100, speed || 1000, 0),
+        };
+      });
+  }
+
+  ospf6(): { routes: Map<string, Route6[]>; neighbors: Map<string, Ospf6Neighbor[]> } {
+    if (this.ospf6Cache) return this.ospf6Cache;
+    const routes = new Map<string, Route6[]>();
+    const neighbors = new Map<string, Ospf6Neighbor[]>();
+    this.ospf6Cache = { routes, neighbors };
+    const routers = this.net.devices.filter((d) => d.ospf6 && this.isRouting6(d) && this.isPowered(d) && this.routerId6(d) !== 0);
+    const ifsOf = new Map(routers.map((r) => [r.id, this.ospf6Ifs(r)]));
+    const edges = new Map<string, { to: string; cost: number; ifName: string; via: bigint }[]>();
+    for (const r of routers) edges.set(r.id, []);
+    for (const a of routers) {
+      const list: Ospf6Neighbor[] = [];
+      for (const ia of ifsOf.get(a.id)!) {
+        if (ia.passive) continue;
+        const reach = this.l2Reach(a, ia.i.entry);
+        const segment: { dev: Device; rid: number; ll: bigint; ifName: string }[] = [{ dev: a, rid: this.routerId6(a), ll: ia.i.linkLocal, ifName: ia.i.entry.name }];
+        for (const b of routers) {
+          if (b.id === a.id) continue;
+          for (const ib of ifsOf.get(b.id)!) {
+            if (ib.passive || ib.area !== ia.area || !reach.has(`${b.id}|${ib.i.entry.name}`)) continue;
+            edges.get(a.id)!.push({ to: b.id, cost: ia.cost, ifName: ia.i.entry.name, via: ib.i.linkLocal });
+            segment.push({ dev: b, rid: this.routerId6(b), ll: ib.i.linkLocal, ifName: ib.i.entry.name });
+          }
+        }
+        const ranked = [...segment].sort((x, y) => y.rid - x.rid);
+        for (const member of segment.slice(1)) {
+          const rank = ranked.findIndex((m) => m.dev.id === member.dev.id);
+          list.push({ routerId: ipStr(member.rid), peerDev: member.dev.id, address: member.ll, ifName: ia.i.entry.name, peerIf: member.ifName, state: rank === 0 ? 'FULL/DR' : rank === 1 ? 'FULL/BDR' : 'FULL/DROTHER' });
+        }
+      }
+      neighbors.set(a.id, list);
+    }
+    for (const source of routers) {
+      const dist = new Map<string, number>([[source.id, 0]]);
+      const first = new Map<string, { ifName: string; via: bigint }>();
+      const done = new Set<string>();
+      while (true) {
+        let current: string | null = null;
+        for (const [id, d] of dist) if (!done.has(id) && (current === null || d < dist.get(current)!)) current = id;
+        if (current === null) break;
+        done.add(current);
+        for (const edge of edges.get(current) ?? []) {
+          const cost = dist.get(current)! + edge.cost;
+          if (!dist.has(edge.to) || cost < dist.get(edge.to)!) {
+            dist.set(edge.to, cost);
+            first.set(edge.to, current === source.id ? { ifName: edge.ifName, via: edge.via } : first.get(current)!);
+          }
+        }
+      }
+      const learned = new Map<string, Route6 & { metric: number }>();
+      for (const target of routers) {
+        if (target.id === source.id || !dist.has(target.id)) continue;
+        const hop = first.get(target.id)!;
+        for (const oi of ifsOf.get(target.id)!) {
+          for (const a of oi.i.addrs) {
+            if (a.origin === 'link-local') continue;
+            const loop = oi.i.entry.attach.kind === 'loop';
+            const prefix = loop ? 128 : a.prefix;
+            const net = loop ? a.addr : network6(a.addr, a.prefix);
+            const key = `${net}/${prefix}`;
+            const metric = dist.get(target.id)! + oi.cost;
+            const existing = learned.get(key);
+            if (existing && existing.metric <= metric) continue;
+            learned.set(key, { code: 'O', net, prefix, via: hop.via, ifName: hop.ifName, metric });
+          }
+        }
+        if (target.ospf6?.defaultOriginate && target.routes6.some((r) => r.prefix === 0) && !learned.has('0/0')) {
+          learned.set('0/0', { code: 'OE2', net: 0n, prefix: 0, via: hop.via, ifName: hop.ifName, metric: 1 });
+        }
+      }
+      routes.set(source.id, [...learned.values()]);
+    }
+    return this.ospf6Cache;
+  }
+
   private hasStaticDefault(device: Device): boolean {
     if (device.routes.some((r) => r.prefix === 0)) return true;
     return device.ports.some((p) => !p.switchport && p.dhcp && Boolean(p.gateway));
   }
+}
+
+function dhcp6InterfaceId(mac: string): bigint {
+  const tail = /^[0-9a-f]{12}$/.test(mac) ? parseInt(mac.slice(-6), 16) : 0;
+  return 0x10000000n | BigInt(tail);
 }
 
 function ipStr(value: number): string {

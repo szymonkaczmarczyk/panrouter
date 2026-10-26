@@ -78,7 +78,7 @@ test('lab grades a correct router configuration', async ({ page, isMobile }) => 
   await expect(page.locator('.lab-results .score-ring strong')).toHaveText('100%');
 });
 
-for (const path of ['/nauka', '/laboratoria', '/gry', '/quizy', '/egzamin', '/slownik', '/urzadzenia', '/ustawienia', '/prywatnosc']) {
+for (const path of ['/nauka', '/laboratoria', '/gry', '/quizy', '/egzamin', '/powtorki', '/statystyki', '/awaria', '/slownik', '/urzadzenia', '/ustawienia', '/prywatnosc']) {
   test(`page ${path} renders without serious accessibility issues`, async ({ page }) => {
     await fresh(page, path);
     await expect(page.locator('main h2').first()).toBeVisible();
@@ -152,4 +152,34 @@ test('laboratorium IPv6: router z CLI, SLAAC na komputerze i ocena', async ({ pa
   await expect(page.locator('.ipv6-list')).toContainText('SLAAC');
   await page.getByRole('button', { name: 'Sprawdź wyniki' }).click();
   await expect(page.locator('.lab-results .score-ring strong')).toHaveText('100%');
+});
+
+test('laboratorium VPN: tunel IPsec z CLI, ocena i ESP w analizatorze', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'pisanie w terminalu sprawdzamy na desktopie');
+  await fresh(page, '/lab/vpn-ipsec');
+  const configure = async (name: string, key: string, peer: string, inside: string, lan: string, far: string) => {
+    await page.locator('[data-device]').filter({ hasText: new RegExp(`^${name}`) }).first().click();
+    const cli = page.getByLabel(new RegExp(`CLI ${name}: wpisz polecenie`));
+    for (const line of ['enable', 'conf t', `crypto isakmp key ${key} address ${peer}`, 'crypto ipsec profile VPN', 'exit', 'interface Tunnel0', `ip address ${inside} 255.255.255.252`, 'tunnel source g0/0/1', 'tunnel mode ipsec ipv4', `tunnel destination ${peer}`, 'tunnel protection ipsec profile VPN', 'exit', `ip route ${lan} 255.255.255.0 ${far}`, 'end', 'show ip interface brief']) {
+      await cli.fill(line);
+      await cli.press('Enter');
+    }
+    await page.getByRole('button', { name: 'Zamknij panel' }).click();
+  };
+  await configure('R1', 'Oddzialy2026', '198.51.100.1', '10.255.0.1', '192.168.2.0', '10.255.0.2');
+  await configure('R2', 'Oddzialy2026', '203.0.113.1', '10.255.0.2', '192.168.1.0', '10.255.0.1');
+  await page.getByRole('button', { name: 'Sprawdź wyniki' }).click();
+  await expect(page.locator('.lab-results .score-ring strong')).toHaveText('100%');
+  await page.keyboard.press('s');
+  await page.keyboard.press('p');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.locator('[data-device]').filter({ hasText: /^PC1/ }).first().click();
+    await page.locator('[data-device]').filter({ hasText: /^SRV2/ }).first().click();
+  }
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('a');
+  const dialog = page.getByRole('dialog', { name: 'Analizator pakietów' });
+  await dialog.getByLabel('Filtr wyświetlania').fill('esp');
+  await expect(dialog.locator('tbody tr').first()).toContainText('ESP');
+  await expect(dialog.locator('tbody tr').first()).toContainText(/203\.0\.113\.1|198\.51\.100\.1/);
 });

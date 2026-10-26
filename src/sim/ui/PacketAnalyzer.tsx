@@ -161,7 +161,7 @@ export function PacketAnalyzer({ ctrl, onClose }: { ctrl: SimController; onClose
           {current && bytes ? (
             <div class="analyzer-detail">
               <Layers frame={current.event.frame} />
-              <pre class="hexdump" aria-label={tx('Bajty ramki', 'Frame bytes')}>
+              <pre class="hexdump" tabIndex={0} aria-label={tx('Bajty ramki', 'Frame bytes')}>
                 {hexDump(bytes)
                   .map((line) => `${line.offset}  ${line.hex.padEnd(49)}  ${line.ascii}`)
                   .join('\n')}

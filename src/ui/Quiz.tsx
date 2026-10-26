@@ -69,7 +69,7 @@ function QuestionView({ item, answer, onAnswer, revealed }: { item: Prepared; an
   const q = item.question;
   if (q.kind === 'single' || q.kind === 'multi') {
     return (
-      <ul class="options" role={q.kind === 'single' ? 'radiogroup' : 'group'}>
+      <ul class="options">
         {item.optionOrder.map((optionIndex, position) => {
           const selected = q.kind === 'single' ? answer === optionIndex : Array.isArray(answer) && answer.includes(optionIndex);
           const isRight = q.kind === 'single' ? q.answer === optionIndex : q.answer.includes(optionIndex);

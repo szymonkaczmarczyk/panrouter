@@ -11,7 +11,7 @@ export const m44: Module = {
     'Adresy 128-bitowe, zapis i skracanie, rodzaje adresów, podsieci /64, SLAAC, NDP zamiast ARP i dual stack.',
     '128-bit addresses, notation and shortening, address types, /64 subnets, SLAAC, NDP instead of ARP and dual stack.',
   ),
-  labs: ['ipv6-podstawy', 'ipv6-trasy'],
+  labs: ['ipv6-podstawy', 'ipv6-trasy', 'ipv6-ospf-dhcp'],
   games: ['ipv6-kompresor'],
   sections: [
     {
@@ -110,6 +110,40 @@ export const m44: Module = {
         ],
       },
     },
+    {
+      id: 'ospfv3-dhcpv6',
+      title: l('OSPFv3 i DHCPv6 na routerze', 'OSPFv3 and DHCPv6 on the router'),
+      body: {
+        pl: [
+          { t: 'p', text: 'OSPFv3 to OSPF dla IPv6. Działa tak samo: routery w jednym obszarze wymieniają informacje o łączach i liczą najkrótsze ścieżki. Różnice są dwie. Proces włączasz na interfejsie, a nie poleceniem network. Sąsiedzi rozmawiają adresami link-local, więc w tablicy tras następnym skokiem jest adres fe80:: sąsiada.' },
+          { t: 'code', lines: ['R1(config)# ipv6 router ospf 1', 'R1(config-rtr)# router-id 1.1.1.1', 'R1(config-rtr)# interface g0/0/1', 'R1(config-if)# ipv6 ospf 1 area 0', 'R1# show ipv6 ospf neighbor'], caption: 'Router-id ma format IPv4. Gdy router nie ma żadnego adresu IPv4, proces nie wystartuje, dopóki nie wpiszesz router-id.' },
+          {
+            t: 'terms',
+            items: [
+              ['Flaga M (managed)', 'Router w RA mówi: adres weź z serwera DHCPv6. To DHCPv6 stanowe, serwer pamięta, komu dał adres.'],
+              ['Flaga O (other)', 'Adres zbuduj sam z SLAAC, a z DHCPv6 weź tylko DNS i domenę. To DHCPv6 bezstanowe.'],
+              ['Brama', 'DHCPv6 nigdy nie podaje bramy. Zawsze pochodzi z ogłoszenia routera (RA).'],
+            ],
+          },
+          { t: 'code', lines: ['R1(config)# ipv6 dhcp pool BIURO6', 'R1(config-dhcpv6)# address prefix 2001:db8:1::/64', 'R1(config-dhcpv6)# dns-server 2001:db8:2::10', 'R1(config-dhcpv6)# interface g0/0/0', 'R1(config-if)# ipv6 dhcp server BIURO6', 'R1(config-if)# ipv6 nd managed-config-flag'], caption: 'Wersja stanowa. Dla bezstanowej pomiń address prefix i ustaw ipv6 nd other-config-flag.' },
+          { t: 'callout', kind: 'info', text: 'W symulatorze SLAAC i DHCPv6 działają od razu po zmianie konfiguracji, bez pokazywania pakietów Solicit, Advertise, Request i Reply.' },
+        ],
+        en: [
+          { t: 'p', text: 'OSPFv3 is OSPF for IPv6. It works the same way: routers in one area exchange link information and compute shortest paths. There are two differences. You enable the process on the interface, not with a network command. Neighbors talk over link-local addresses, so the next hop in the routing table is the neighbor’s fe80:: address.' },
+          { t: 'code', lines: ['R1(config)# ipv6 router ospf 1', 'R1(config-rtr)# router-id 1.1.1.1', 'R1(config-rtr)# interface g0/0/1', 'R1(config-if)# ipv6 ospf 1 area 0', 'R1# show ipv6 ospf neighbor'], caption: 'The router-id looks like IPv4. When the router has no IPv4 address at all, the process will not start until you set a router-id.' },
+          {
+            t: 'terms',
+            items: [
+              ['M flag (managed)', 'The router says in its RA: take the address from the DHCPv6 server. This is stateful DHCPv6, the server remembers who got which address.'],
+              ['O flag (other)', 'Build the address yourself with SLAAC and take only DNS and the domain from DHCPv6. This is stateless DHCPv6.'],
+              ['Gateway', 'DHCPv6 never hands out a gateway. It always comes from the router advertisement (RA).'],
+            ],
+          },
+          { t: 'code', lines: ['R1(config)# ipv6 dhcp pool BIURO6', 'R1(config-dhcpv6)# address prefix 2001:db8:1::/64', 'R1(config-dhcpv6)# dns-server 2001:db8:2::10', 'R1(config-dhcpv6)# interface g0/0/0', 'R1(config-if)# ipv6 dhcp server BIURO6', 'R1(config-if)# ipv6 nd managed-config-flag'], caption: 'The stateful version. For stateless, skip address prefix and set ipv6 nd other-config-flag.' },
+          { t: 'callout', kind: 'info', text: 'In the simulator SLAAC and DHCPv6 take effect right after a configuration change, without showing Solicit, Advertise, Request and Reply packets.' },
+        ],
+      },
+    },
   ],
   quiz: [
     { id: 'q44-1', kind: 'input', q: l('Ile bitów ma adres IPv6?', 'How many bits does an IPv6 address have?'), answer: ['128'], explain: l('IPv6 ma 128 bitów, IPv4 32.', 'IPv6 has 128 bits, IPv4 has 32.') },
@@ -122,5 +156,7 @@ export const m44: Module = {
     { id: 'q44-8', kind: 'single', q: l('Co oznacza dual stack?', 'What does dual stack mean?'), options: [l('Dwa routery', 'Two routers'), l('IPv4 i IPv6 działają jednocześnie', 'IPv4 and IPv6 run at the same time'), l('Dwa adresy MAC', 'Two MAC addresses'), l('Podwójny NAT', 'Double NAT')], answer: 1, explain: l('Urządzenie ma oba stosy protokołów naraz.', 'The device runs both protocol stacks at once.') },
     { id: 'q44-9', kind: 'single', q: l('Router ma adres 2001:db8:10::1/64, ale komputery nie dostają adresów z SLAAC. Czego najpewniej brakuje?', 'A router has 2001:db8:10::1/64, but computers get no SLAAC addresses. What is most likely missing?'), options: [l('ipv6 unicast-routing', 'ipv6 unicast-routing'), l('Serwera DHCPv4', 'A DHCPv4 server'), l('Trasy domyślnej na komputerach', 'A default route on the computers'), l('Rekordu DNS', 'A DNS record')], answer: 0, explain: l('Bez ipv6 unicast-routing router nie wysyła Router Advertisement, więc komputery nie znają prefiksu.', 'Without ipv6 unicast-routing the router sends no Router Advertisements, so computers do not learn the prefix.') },
     { id: 'q44-10', kind: 'single', q: l('Następny skok trasy IPv6 to adres fe80::2. Co jeszcze trzeba podać?', 'An IPv6 route next hop is fe80::2. What else must you specify?'), options: [l('Interfejs wyjściowy', 'The exit interface'), l('Maskę w notacji kropkowej', 'A dotted mask'), l('Numer VLAN', 'A VLAN number'), l('Nic więcej', 'Nothing else')], answer: 0, explain: l('Adres link-local jest unikalny tylko na jednym łączu, więc router musi wiedzieć, przez który interfejs wysłać pakiet.', 'A link-local address is unique only on one link, so the router must know which interface to use.') },
+    { id: 'q44-11', kind: 'single', q: l('Co jest następnym skokiem trasy nauczonej przez OSPFv3?', 'What is the next hop of a route learned through OSPFv3?'), options: [l('Adres link-local sąsiada', 'The neighbor’s link-local address'), l('Adres globalny sąsiada', 'The neighbor’s global address'), l('Router-id sąsiada', 'The neighbor’s router-id'), l('Adres multicast ff02::5', 'The ff02::5 multicast address')], answer: 0, explain: l('OSPFv3 rozmawia przez adresy link-local, więc trasy wskazują fe80:: sąsiada i interfejs wyjściowy.', 'OSPFv3 talks over link-local addresses, so routes point at the neighbor’s fe80:: address and an exit interface.') },
+    { id: 'q44-12', kind: 'single', q: l('Router ogłasza flagę O i ma serwer DHCPv6 z dns-server. Co dostanie komputer?', 'The router sets the O flag and has a DHCPv6 server with dns-server. What does the computer get?'), options: [l('Adres z SLAAC i DNS z DHCPv6', 'An address from SLAAC and DNS from DHCPv6'), l('Adres i bramę z DHCPv6', 'An address and gateway from DHCPv6'), l('Tylko adres link-local', 'Only a link-local address'), l('Adres z DHCPv4', 'An address from DHCPv4')], answer: 0, explain: l('Flaga O to DHCPv6 bezstanowe: adres z SLAAC, a z serwera tylko DNS i domena. Bramy DHCPv6 nie podaje nigdy.', 'The O flag means stateless DHCPv6: the address comes from SLAAC and only DNS and the domain come from the server. DHCPv6 never gives a gateway.') },
   ],
 };

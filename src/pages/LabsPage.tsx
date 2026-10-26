@@ -1,4 +1,4 @@
-import { ArrowRight, CircleCheck, Clock, FlaskConical, Siren } from 'lucide-preact';
+import { ArrowRight, CircleCheck, Clock, FlaskConical, GraduationCap, Siren } from 'lucide-preact';
 import { useEffect } from 'preact/hooks';
 import { setMeta } from '../app/meta';
 import { href } from '../app/router';
@@ -24,6 +24,17 @@ export function LabsPage() {
         </span>
         <span class="btn btn-sm">
           {tx('Zacznij dyżur', 'Start a shift')}
+          <ArrowRight aria-hidden="true" />
+        </span>
+      </a>
+      <a class="card card-link incident-promo" href={href('/symulator')}>
+        <GraduationCap aria-hidden="true" class="bento-icon" />
+        <span class="stack" style={{ gap: 'var(--space-1)' }}>
+          <strong>{tx('Własne laboratorium dla grupy', 'Your own lab for a group')}</strong>
+          <span class="muted small">{tx('Zbuduj sieć w symulatorze, wybierz Plik, a potem „Zrób z tej sieci laboratorium”. Dopisz warunki, np. PC1 pinguje SRV1, i wyślij link. Każda osoba dostanie zadanie z oceną.', 'Build a network in the simulator, choose File and then “Turn this network into a lab”. Add conditions such as PC1 pings SRV1 and send the link. Everyone gets a graded task.')}</span>
+        </span>
+        <span class="btn btn-sm">
+          {tx('Otwórz symulator', 'Open the simulator')}
           <ArrowRight aria-hidden="true" />
         </span>
       </a>

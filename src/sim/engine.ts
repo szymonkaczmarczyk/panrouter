@@ -18,6 +18,7 @@ import type {
   Port,
   Protocol,
   TraceEvent,
+  VirtualIf,
 } from './types';
 
 interface QueueItem {
@@ -124,6 +125,8 @@ export function protocolOf(frame: Frame): Protocol {
   if (frame.type === 'arp') return 'ARP';
   if (frame.type === 'ipv6') return frame.ip6?.icmp6.type === 'ns' || frame.ip6?.icmp6.type === 'na' ? 'NDP' : 'ICMPv6';
   const ip = frame.ip!;
+  if (ip.proto === 'esp') return 'ESP';
+  if (ip.proto === 'gre') return 'GRE';
   if (ip.proto === 'icmp') return 'ICMP';
   if (ip.proto === 'udp') {
     if (ip.udp?.dhcp) return 'DHCP';
@@ -132,6 +135,10 @@ export function protocolOf(frame: Frame): Protocol {
   }
   if (ip.tcp?.http) return ip.tcp.dport === 443 || ip.tcp.sport === 443 ? 'HTTPS' : 'HTTP';
   return 'TCP';
+}
+
+function spiFor(src: number, dst: number): number {
+  return (Math.imul(src ^ 0x5bd1e995, 31) ^ dst) >>> 0 || 0x100;
 }
 
 function initialTtl(device: Device): number {
@@ -657,7 +664,35 @@ export class Simulator {
       iface: this.shortIf(device, outIf),
       code: found.route.code,
     });
+    if (outIf.attach.kind === 'tunnel') return this.tunnelSend(device, outIf, pkt);
     this.sendIp(device, outIf, found.nextHop, pkt);
+  }
+
+  private tunnelSend(device: Device, tunnel: L3If, inner: Ipv4Packet): void {
+    const vif = tunnel.cfg as VirtualIf;
+    const src = this.topo.tunnelSourceIp(device, vif);
+    const dst = parseIp(vif.tunnelDest);
+    if (!tunnel.up || src === null || dst === null) return this.drop('tunnel.down', { iface: vif.name });
+    const found = this.topo.lookup(device, dst);
+    if (!found) return this.drop('ip.noRoute', { ip: ipToStr(dst) });
+    const outIf = this.topo.l3If(device, found.ifName)!;
+    if (outIf.attach.kind === 'tunnel') return this.drop('tunnel.recursive', { iface: vif.name, ip: ipToStr(dst) });
+    const esp = vif.tunnelMode === 'ipsec';
+    const outer: Ipv4Packet = { src, dst, ttl: 255, proto: esp ? 'esp' : 'gre', inner, spi: esp ? spiFor(src, dst) : undefined };
+    this.note(esp ? 'tunnel.encrypt' : 'tunnel.encap', { iface: vif.name, src: ipToStr(src), dst: ipToStr(dst) });
+    this.sendIp(device, outIf, found.nextHop, outer);
+  }
+
+  private tunnelReceive(device: Device, pkt: Ipv4Packet): void {
+    const esp = pkt.proto === 'esp';
+    const entry = this.topo.l3Ifs(device).find((e) => {
+      if (e.attach.kind !== 'tunnel' || !e.up) return false;
+      const vif = e.cfg as VirtualIf;
+      return (vif.tunnelMode === 'ipsec') === esp && this.topo.tunnelSourceIp(device, vif) === pkt.dst && parseIp(vif.tunnelDest) === pkt.src;
+    });
+    if (!entry || !pkt.inner) return this.drop(esp ? 'tunnel.noSa' : 'tunnel.noMatch', { ip: ipToStr(pkt.src) });
+    this.note(esp ? 'tunnel.decrypt' : 'tunnel.decap', { iface: entry.name, ip: ipToStr(pkt.src) });
+    this.ipReceive(device, entry, pkt.inner);
   }
 
   private shortIf(device: Device, entry: L3If): string {
@@ -723,7 +758,8 @@ export class Simulator {
       via: ipToStr(found.nextHop),
       iface: this.shortIf(device, outIf),
     });
-    this.sendIp(device, outIf, found.nextHop, packet);
+    if (outIf.attach.kind === 'tunnel') this.tunnelSend(device, outIf, packet);
+    else this.sendIp(device, outIf, found.nextHop, packet);
     return 'sent';
   }
 
@@ -751,6 +787,7 @@ export class Simulator {
   }
 
   private localDeliver(device: Device, pkt: Ipv4Packet): void {
+    if (pkt.proto === 'esp' || pkt.proto === 'gre') return this.tunnelReceive(device, pkt);
     const st = this.st(device);
     if (pkt.proto === 'icmp' && pkt.icmp) {
       const icmp = pkt.icmp;
@@ -932,6 +969,7 @@ export class Simulator {
       if (!aclPermitsSource(device, rule.acl, pkt.src)) continue;
       const st = this.st(device);
       const proto = pkt.proto;
+      if (proto !== 'icmp' && proto !== 'tcp' && proto !== 'udp') continue;
       const insidePort = proto === 'icmp' ? pkt.icmp!.id : proto === 'tcp' ? pkt.tcp!.sport : pkt.udp!.sport;
       let entry = st.nat.find((e) => e.proto === proto && e.insideIp === pkt.src && e.insidePort === insidePort);
       if (!entry) {

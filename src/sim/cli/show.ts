@@ -48,6 +48,7 @@ function ifStatus(sim: Simulator, device: Device, entry: L3If | null, port: Port
     const up = entry?.up ?? false;
     if (vif.kind === 'svi') return { status: 'up', protocol: up ? 'up' : 'down' };
     if (vif.kind === 'loop') return { status: 'up', protocol: 'up' };
+    if (vif.kind === 'tunnel') return { status: 'up', protocol: up ? 'up' : 'down' };
     const parent = device.ports.find((p) => p.name === vif.parent);
     if (parent?.shutdown) return { status: 'administratively down', protocol: 'down' };
     return { status: up ? 'up' : 'down', protocol: up ? 'up' : 'down' };
@@ -205,7 +206,7 @@ export function showArp(sim: Simulator, device: Device): string[] {
   const lines = [`${pad('Protocol', 10)}${pad('Address', 17)}${pad('Age (min)', 11)}${pad('Hardware Addr', 16)}${pad('Type', 7)}Interface`];
   const rows: { ip: number; age: string; mac: string; ifName: string }[] = [];
   for (const entry of sim.topo.l3Ifs(device)) {
-    if (entry.ip === null || !entry.up || entry.attach.kind === 'loop') continue;
+    if (entry.ip === null || !entry.up || entry.attach.kind === 'loop' || entry.attach.kind === 'tunnel') continue;
     rows.push({ ip: entry.ip, age: '-', mac: entry.mac, ifName: entry.name });
   }
   for (const entry of sim.arpTable(device)) rows.push({ ip: entry.ip, age: '0', mac: entry.mac, ifName: entry.ifName });
@@ -468,6 +469,10 @@ function l3Extras(cfg: Port | VirtualIf, lines: string[]): void {
   if (cfg.ospfCost) lines.push(` ip ospf cost ${cfg.ospfCost}`);
   if (cfg.ipv6Enable) lines.push(' ipv6 enable');
   for (const address of cfg.ipv6) lines.push(` ipv6 address ${address.toUpperCase()}`);
+  if (cfg.ndManaged) lines.push(' ipv6 nd managed-config-flag');
+  if (cfg.ndOther) lines.push(' ipv6 nd other-config-flag');
+  if (cfg.dhcp6Server) lines.push(` ipv6 dhcp server ${cfg.dhcp6Server}`);
+  if (cfg.ospf6Pid) lines.push(` ipv6 ospf ${cfg.ospf6Pid} area ${cfg.ospf6Area}`);
   const group = cfg.fhrp;
   if (!group) return;
   if (group.proto === 'vrrp') {
@@ -487,6 +492,12 @@ function vifLines(vif: VirtualIf): string[] {
   if (vif.kind === 'sub') lines.push(` encapsulation dot1Q ${vif.vlan}`);
   lines.push(vif.ip ? ` ip address ${vif.ip} ${maskStr(vif.prefix)}` : ' no ip address');
   l3Extras(vif, lines);
+  if (vif.kind === 'tunnel') {
+    if (vif.tunnelSource) lines.push(` tunnel source ${vif.tunnelSource}`);
+    if (vif.tunnelMode === 'ipsec') lines.push(' tunnel mode ipsec ipv4');
+    if (vif.tunnelDest) lines.push(` tunnel destination ${vif.tunnelDest}`);
+    if (vif.tunnelProtection) lines.push(` tunnel protection ipsec profile ${vif.tunnelProtection}`);
+  }
   if (vif.shutdown) lines.push(' shutdown');
   return lines;
 }
@@ -520,7 +531,17 @@ export function runningConfig(_sim: Simulator, device: Device): string[] {
     if (device.dhcpSnooping.enabled || device.dhcpSnooping.vlans.length) out.push('!');
   }
   if (device.kind === 'l3switch' && device.ipRouting) out.push('ip routing', '!');
+  for (const key of device.cryptoKeys) out.push(`crypto isakmp key ${key.key} address ${key.peer}`);
+  if (device.cryptoKeys.length) out.push('!');
+  for (const profile of device.ipsecProfiles) out.push(`crypto ipsec profile ${profile}`, '!');
   if (device.ipv6Routing) out.push('ipv6 unicast-routing', '!');
+  for (const pool of device.dhcp6Pools) {
+    out.push(`ipv6 dhcp pool ${pool.name}`);
+    if (pool.prefix) out.push(` address prefix ${pool.prefix.toUpperCase()}`);
+    if (pool.dns) out.push(` dns-server ${pool.dns.toUpperCase()}`);
+    if (pool.domain) out.push(` domain-name ${pool.domain}`);
+    out.push('!');
+  }
   for (const group of [...new Set(device.ports.filter((p) => p.switchport && p.channelGroup > 0).map((p) => p.channelGroup))].sort((a, b) => a - b)) {
     const reference = device.ports.find((p) => p.switchport && p.channelGroup === group)!;
     const lines = [`interface Port-channel${group}`];
@@ -546,6 +567,14 @@ export function runningConfig(_sim: Simulator, device: Device): string[] {
     if (o.refBw !== 100) out.push(` auto-cost reference-bandwidth ${o.refBw}`);
     for (const p of o.passive) out.push(` passive-interface ${p}`);
     for (const n of o.networks) out.push(` network ${n.net} ${n.wildcard} area ${n.area}`);
+    if (o.defaultOriginate) out.push(' default-information originate');
+    out.push('!');
+  }
+  if (device.ospf6) {
+    const o = device.ospf6;
+    out.push(`ipv6 router ospf ${o.processId}`);
+    if (o.routerId) out.push(` router-id ${o.routerId}`);
+    for (const p of o.passive) out.push(` passive-interface ${p}`);
     if (o.defaultOriginate) out.push(' default-information originate');
     out.push('!');
   }
@@ -604,15 +633,66 @@ export function showIpv6IntBrief(sim: Simulator, device: Device): string[] {
 
 export function showIpv6Route(sim: Simulator, device: Device): string[] {
   const routes = sim.topo.routes6(device);
-  const lines = [`IPv6 Routing Table - default - ${routes.length} entries`, 'Codes: C - Connected, L - Local, S - Static, ND - ND Default', ''];
+  const lines = [`IPv6 Routing Table - default - ${routes.length} entries`, 'Codes: C - Connected, L - Local, S - Static, ND - ND Default', '       O - OSPF Intra, OE2 - OSPF ext 2', ''];
   for (const route of routes) {
-    const ad = route.code === 'S' ? '[1/0]' : route.code === 'ND' ? '[2/0]' : '[0/0]';
+    const ad = route.code === 'S' ? '[1/0]' : route.code === 'ND' ? '[2/0]' : route.code === 'O' || route.code === 'OE2' ? `[110/${route.metric ?? 1}]` : '[0/0]';
     lines.push(`${pad(route.code, 4)}${upper6(route.net)}/${route.prefix} ${ad}`);
     if (route.code === 'C') lines.push(`     via ${route.ifName}, directly connected`);
     else if (route.code === 'L') lines.push(`     via ${route.ifName}, receive`);
     else lines.push(`     via ${route.via !== null ? upper6(route.via) : ''}${route.ifName ? `, ${route.ifName}` : ''}`);
   }
   return lines;
+}
+
+export function showOspf6Neighbors(sim: Simulator, device: Device): string[] {
+  if (!device.ospf6) return [''];
+  const neighbors = sim.topo.ospf6().neighbors.get(device.id) ?? [];
+  const lines = ['', `          OSPFv3 Router with ID (${ipToStr(sim.topo.routerId6(device))}) (Process ID ${device.ospf6.processId})`, '', `${pad('Neighbor ID', 16)}${pad('Pri', 6)}${pad('State', 16)}${pad('Dead Time', 12)}${pad('Interface ID', 14)}Interface`];
+  for (const n of neighbors) {
+    const peer = sim.net.devices.find((d) => d.id === n.peerDev);
+    const peerIndex = peer ? Math.max(1, [...peer.ports.map((p) => p.name), ...peer.vifs.map((v) => v.name)].indexOf(n.peerIf) + 1) : 1;
+    lines.push(`${pad(n.routerId, 16)}${pad('  1', 6)}${pad(n.state, 16)}${pad('00:00:36', 12)}${pad(peerIndex, 14)}${shortIfName(device, n.ifName)}`);
+  }
+  return lines;
+}
+
+function tunnels(sim: Simulator, device: Device) {
+  return device.vifs
+    .filter((v) => v.kind === 'tunnel' && v.tunnelMode === 'ipsec')
+    .map((vif) => ({ vif, src: sim.topo.tunnelSourceIp(device, vif), peer: sim.topo.tunnelPeer(device, vif), up: sim.topo.tunnelUp(device, vif) }));
+}
+
+export function showIsakmpSa(sim: Simulator, device: Device): string[] {
+  const lines = ['IPv4 Crypto ISAKMP SA', `${pad('dst', 16)}${pad('src', 16)}${pad('state', 12)}${pad('conn-id', 8)}status`];
+  let id = 1001;
+  for (const t of tunnels(sim, device)) {
+    if (t.src === null || !t.peer) continue;
+    lines.push(`${pad(t.vif.tunnelDest, 16)}${pad(ipToStr(t.src), 16)}${pad(t.up ? 'QM_IDLE' : 'MM_KEY_EXCH', 12)}${pad(id++, 8)}${t.up ? 'ACTIVE' : 'FAILED'}`);
+  }
+  return lines;
+}
+
+export function showIpsecSa(sim: Simulator, device: Device): string[] {
+  const lines: string[] = [];
+  for (const t of tunnels(sim, device)) {
+    lines.push('', `interface: ${t.vif.name}`, `    Crypto map tag: ${t.vif.name}-head-0, local addr ${t.src !== null ? ipToStr(t.src) : '0.0.0.0'}`, '', `   current_peer ${t.vif.tunnelDest || '0.0.0.0'} port 500`);
+    lines.push(`     PERMIT, flags={origin_is_acl,}`, `   local crypto endpt.: ${t.src !== null ? ipToStr(t.src) : '0.0.0.0'}, remote crypto endpt.: ${t.vif.tunnelDest || '0.0.0.0'}`);
+    lines.push(`     inbound esp sas: ${t.up ? '1' : '0'}`, `     outbound esp sas: ${t.up ? '1' : '0'}`, `     Status: ${t.up ? 'ACTIVE(ACTIVE)' : 'DOWN'}`);
+  }
+  return lines.length ? lines : [''];
+}
+
+export function showDhcp6Pool(_sim: Simulator, device: Device): string[] {
+  const lines: string[] = [];
+  for (const pool of device.dhcp6Pools) {
+    lines.push(`DHCPv6 pool: ${pool.name}`);
+    if (pool.prefix) lines.push(`  Address allocation prefix: ${pool.prefix.toUpperCase()} valid 172800 preferred 86400`);
+    if (pool.dns) lines.push(`  DNS server: ${pool.dns.toUpperCase()}`);
+    if (pool.domain) lines.push(`  Domain name: ${pool.domain}`);
+    const users = [...device.ports, ...device.vifs].filter((cfg) => cfg.dhcp6Server === pool.name).length;
+    lines.push(`  Active clients: 0`, `  Interfaces using the pool: ${users}`);
+  }
+  return lines.length ? lines : [''];
 }
 
 export function showIpv6Neighbors(sim: Simulator, device: Device): string[] {

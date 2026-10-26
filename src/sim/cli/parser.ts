@@ -4,7 +4,7 @@ import { parseCidr6, parseIpv6 } from '../ip6';
 import type { Device, DeviceKind } from '../types';
 import { expandRange, resolveIface } from './iface';
 
-export type Mode = 'user' | 'priv' | 'config' | 'if' | 'if-range' | 'subif' | 'vlan' | 'router' | 'dhcp' | 'std-acl' | 'ext-acl' | 'line';
+export type Mode = 'user' | 'priv' | 'config' | 'if' | 'if-range' | 'subif' | 'vlan' | 'router' | 'router6' | 'dhcp' | 'dhcp6' | 'ipsec' | 'std-acl' | 'ext-acl' | 'line';
 
 export type ParamType = 'ip' | 'ip6' | 'ip6p' | 'mask' | 'wild' | 'num' | 'word' | 'iface' | 'ifnew' | 'line' | 'vlans' | 'ifrange';
 

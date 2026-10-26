@@ -1,4 +1,4 @@
-import { Ban, BookA, Search } from 'lucide-preact';
+import { Ban, BookA, CalendarCheck, CalendarPlus, Search } from 'lucide-preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { setMeta } from '../app/meta';
 import { GLOSSARY } from '../content/glossary';
@@ -6,10 +6,12 @@ import { lang, t, tr, tx } from '../i18n';
 import { l, type L10n } from '../i18n/l10n';
 import { CATEGORY_ORDER, MODELS } from '../sim/catalog';
 import { DeviceGlyph } from '../sim/ui/DeviceGlyph';
+import { progress, toggleTermReview } from '../state/progress';
+import { termKey } from '../state/reviews';
 
 export function GlossaryPage() {
   const [query, setQuery] = useState('');
-  useEffect(() => setMeta(tx('Słownik pojęć sieciowych', 'Networking glossary'), tx('Ponad 70 pojęć sieciowych wyjaśnionych prostym językiem po polsku i angielsku.', 'Over 70 networking terms explained in plain Polish and English.')), []);
+  useEffect(() => setMeta(tx('Słownik pojęć sieciowych', 'Networking glossary'), tx('Ponad 80 pojęć sieciowych wyjaśnionych prostym językiem. Wybrane hasła wracają w powtórkach.', 'Over 80 networking terms explained in plain language. Chosen terms come back in reviews.')), []);
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();
     return [...GLOSSARY].sort((a, b) => a.term.localeCompare(b.term, 'pl')).filter((g) => !q || g.term.toLowerCase().includes(q) || tr(g.def).toLowerCase().includes(q));
@@ -20,7 +22,7 @@ export function GlossaryPage() {
       <header class="page-head">
         <span class="eyebrow">{t('nav.glossary')}</span>
         <h2>{tx('Pojęcia od A do Z', 'Terms from A to Z')}</h2>
-        <p>{tx('Krótkie definicje skrótów i pojęć z kursu. Wpisz słowo, żeby zawęzić listę.', 'Short definitions of acronyms and terms from the course. Type a word to filter.')}</p>
+        <p>{tx('Krótkie definicje skrótów i pojęć z kursu. Wpisz słowo, żeby zawęzić listę. Przyciskiem „Powtarzaj” dodasz hasło do powtórek po 1, 3 i 7 dniach.', 'Short definitions of acronyms and terms from the course. Type a word to filter. The “Review” button adds a term to reviews after 1, 3 and 7 days.')}</p>
       </header>
       <div class="search-box">
         <Search aria-hidden="true" />
@@ -45,10 +47,19 @@ export function GlossaryPage() {
         <dl class="terms glossary">
           {items.map((g, i) => {
             const first = i === 0 || items[i - 1].term[0].toUpperCase() !== g.term[0].toUpperCase();
+            const queued = Boolean(progress.value.reviews[termKey(g.term)]);
             return (
               <div key={g.term} id={first ? `litera-${g.term[0].toUpperCase()}` : undefined}>
                 <dt>{g.term}</dt>
-                <dd>{tr(g.def)}</dd>
+                <dd>
+                  {tr(g.def)}
+                  <div class="term-review">
+                    <button type="button" class="btn btn-sm btn-ghost" aria-pressed={queued} onClick={() => toggleTermReview(g.term)} aria-label={queued ? tx(`Usuń ${g.term} z powtórek`, `Remove ${g.term} from reviews`) : tx(`Powtarzaj hasło ${g.term}`, `Review the term ${g.term}`)}>
+                      {queued ? <CalendarCheck aria-hidden="true" /> : <CalendarPlus aria-hidden="true" />}
+                      {queued ? tx('W powtórkach', 'In reviews') : tx('Powtarzaj', 'Review')}
+                    </button>
+                  </div>
+                </dd>
               </div>
             );
           })}

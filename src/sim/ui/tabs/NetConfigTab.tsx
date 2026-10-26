@@ -92,6 +92,13 @@ function InterfaceEditor({ device, name, run }: { device: Device; name: string; 
         </label>
       </div>
       <Field id={`desc-${name}`} label={tx('Opis', 'Description')} value={description} onInput={setDescription} placeholder={tx('np. Łącze do SW1', 'e.g. Link to SW1')} />
+      {vif?.kind === 'tunnel' && (
+        <p class="small muted">
+          {vif.tunnelSource && vif.tunnelDest
+            ? tx(`Tunel ${vif.tunnelMode === 'ipsec' ? 'IPsec' : 'GRE'} od ${vif.tunnelSource} do ${vif.tunnelDest}. Źródło, cel i szyfrowanie zmienisz w CLI poleceniami tunnel.`, `${vif.tunnelMode === 'ipsec' ? 'IPsec' : 'GRE'} tunnel from ${vif.tunnelSource} to ${vif.tunnelDest}. Change the source, destination and encryption in the CLI with tunnel commands.`)
+            : tx('Ustaw w CLI tunnel source, tunnel destination i tryb tunelu. Tutaj zmienisz adres IP i opis.', 'Set tunnel source, tunnel destination and the tunnel mode in the CLI. Here you change the IP address and description.')}
+        </p>
+      )}
       {isSwitchport ? (
         <>
           <div class="segmented" role="radiogroup" aria-label={tx('Tryb portu', 'Port mode')}>

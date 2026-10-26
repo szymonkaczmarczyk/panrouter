@@ -6,6 +6,10 @@ export interface Term {
 }
 
 export const GLOSSARY: Term[] = [
+  { term: 'GRE', def: l('Prosty tunel (protokół IP numer 47), który pakuje pakiet w nowy nagłówek IP, ale niczego nie szyfruje.', 'A simple tunnel (IP protocol 47) that wraps a packet in a new IP header but encrypts nothing.') },
+  { term: 'ESP', def: l('Część IPsec, która szyfruje pakiet i sprawdza jego integralność (protokół IP numer 50). Po drodze widać tylko adresy końców tunelu.', 'The IPsec part that encrypts a packet and checks its integrity (IP protocol 50). On the way only the tunnel end addresses are visible.') },
+  { term: 'OSPFv3', def: l('OSPF dla IPv6. Włącza się go na interfejsie poleceniem ipv6 ospf, a sąsiedzi rozmawiają adresami link-local.', 'OSPF for IPv6. It is enabled per interface with ipv6 ospf and neighbors talk over link-local addresses.') },
+  { term: 'DHCPv6', def: l('Serwer adresów i ustawień dla IPv6. Flaga M w ogłoszeniu routera każe brać adres z serwera, flaga O tylko DNS i domenę. Bramy nie podaje.', 'The address and settings server for IPv6. The M flag in the router advertisement means take the address from the server, the O flag means only DNS and the domain. It never gives a gateway.') },
   { term: 'ACL', def: l('Lista kontroli dostępu: reguły permit i deny sprawdzane od góry, z niewidocznym deny any na końcu.', 'Access control list: permit and deny rules checked top-down, with an invisible deny any at the end.') },
   { term: 'AP (punkt dostępowy)', def: l('Urządzenie, które łączy klientów Wi-Fi z siecią przewodową.', 'A device that bridges Wi-Fi clients into the wired network.') },
   { term: 'APIPA', def: l('Adres awaryjny 169.254.x.x nadawany, gdy serwer DHCP nie odpowiada.', 'The 169.254.x.x fallback address assigned when no DHCP server answers.') },

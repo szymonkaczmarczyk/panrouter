@@ -48,7 +48,10 @@ const MODE_SUFFIX: Record<Mode, string> = {
   subif: '(config-subif)#',
   vlan: '(config-vlan)#',
   router: '(config-router)#',
+  router6: '(config-rtr)#',
   dhcp: '(dhcp-config)#',
+  dhcp6: '(config-dhcpv6)#',
+  ipsec: '(ipsec-profile)#',
   'std-acl': '(config-std-nacl)#',
   'ext-acl': '(config-ext-nacl)#',
   line: '(config-line)#',
@@ -61,7 +64,7 @@ export function cliPrompt(device: Device, session: CliSession): string {
 const SWITCHES = ['switch', 'l3switch'] as const;
 const ROUTERS = ['router', 'l3switch'] as const;
 const IF_MODES: Mode[] = ['if', 'if-range', 'subif'];
-const CONFIG_SUBMODES: Mode[] = ['if', 'if-range', 'subif', 'vlan', 'router', 'dhcp', 'std-acl', 'ext-acl', 'line'];
+const CONFIG_SUBMODES: Mode[] = ['if', 'if-range', 'subif', 'vlan', 'router', 'router6', 'dhcp', 'dhcp6', 'ipsec', 'std-acl', 'ext-acl', 'line'];
 const SHOW_MODES: Mode[] = ['user', 'priv'];
 
 function err(ctx: Ctx, text: string): void {
@@ -384,6 +387,10 @@ const showDefs: [string, (ctx: Ctx, args: Args) => string[], Device['kind'][]?, 
   ['show ipv6 interface brief', (c) => show.showIpv6IntBrief(c.sim, c.device), [...ROUTERS]],
   ['show ipv6 route', (c) => show.showIpv6Route(c.sim, c.device), [...ROUTERS]],
   ['show ipv6 neighbors', (c) => show.showIpv6Neighbors(c.sim, c.device), [...ROUTERS]],
+  ['show crypto isakmp sa', (c) => show.showIsakmpSa(c.sim, c.device), ['router']],
+  ['show crypto ipsec sa', (c) => show.showIpsecSa(c.sim, c.device), ['router']],
+  ['show ipv6 ospf neighbor', (c) => show.showOspf6Neighbors(c.sim, c.device), [...ROUTERS]],
+  ['show ipv6 dhcp pool', (c) => show.showDhcp6Pool(c.sim, c.device), [...ROUTERS]],
   ['show ip arp', (c) => show.showArp(c.sim, c.device)],
   ['show arp', (c) => show.showArp(c.sim, c.device)],
   ['show ip ospf neighbor', (c) => show.showOspfNeighbors(c.sim, c.device), [...ROUTERS]],
@@ -432,6 +439,7 @@ def(['config'], 'interface <ifnew:if>', (ctx, a) => {
       ctx.device.vifs.push(blankVif('svi', ref.name, '', ref.vlan));
     }
     if (ref.kind === 'loop') ctx.device.vifs.push(blankVif('loop', ref.name));
+    if (ref.kind === 'tunnel') ctx.device.vifs.push(blankVif('tunnel', ref.name));
     mark(ctx);
   }
   ctx.session.ifaces = [ref.name];
@@ -1098,6 +1106,153 @@ def(IF_MODES, 'no ipv6 address <ip6p:addr>', (ctx, a) => {
   forIpv6Targets(ctx, (t) => (t.ipv6 = t.ipv6.filter((v) => parseCidr6(v)?.addr !== parsed.addr)));
 }, [...ROUTERS]);
 def(IF_MODES, 'ipv6 enable', (ctx) => forIpv6Targets(ctx, (t) => (t.ipv6Enable = true)), [...ROUTERS]);
+def(IF_MODES, 'ipv6 ospf <num:pid:1-65535> area <num:area:0-4294967295>', (ctx, a) => {
+  const pid = a.pid as number;
+  if (ctx.device.ospf6 && ctx.device.ospf6.processId !== pid) return err(ctx, '% Only one OSPFv3 process is supported in this simulator');
+  if (!ctx.device.ipv6Routing) return err(ctx, '% IPv6 routing not enabled');
+  if (!ctx.device.ospf6) {
+    ctx.device.ospf6 = { processId: pid, routerId: '', passive: [], defaultOriginate: false };
+    noRouterIdWarning(ctx);
+  }
+  forIpv6Targets(ctx, (t) => {
+    t.ospf6Pid = pid;
+    t.ospf6Area = a.area as number;
+  });
+}, [...ROUTERS]);
+def(IF_MODES, 'no ipv6 ospf <num:pid:1-65535> area <num:area:0-4294967295>', (ctx) => forIpv6Targets(ctx, (t) => (t.ospf6Pid = 0)), [...ROUTERS]);
+def(IF_MODES, 'ipv6 dhcp server <word:name>', (ctx, a) => forIpv6Targets(ctx, (t) => (t.dhcp6Server = a.name as string)), [...ROUTERS]);
+def(IF_MODES, 'no ipv6 dhcp server', (ctx) => forIpv6Targets(ctx, (t) => (t.dhcp6Server = '')), [...ROUTERS]);
+def(IF_MODES, 'ipv6 nd managed-config-flag', (ctx) => forIpv6Targets(ctx, (t) => (t.ndManaged = true)), [...ROUTERS]);
+def(IF_MODES, 'no ipv6 nd managed-config-flag', (ctx) => forIpv6Targets(ctx, (t) => (t.ndManaged = false)), [...ROUTERS]);
+def(IF_MODES, 'ipv6 nd other-config-flag', (ctx) => forIpv6Targets(ctx, (t) => (t.ndOther = true)), [...ROUTERS]);
+def(IF_MODES, 'no ipv6 nd other-config-flag', (ctx) => forIpv6Targets(ctx, (t) => (t.ndOther = false)), [...ROUTERS]);
+
+function tunnelTargets(ctx: Ctx): VirtualIf[] {
+  const tunnels = targetsL3(ctx).filter((t): t is VirtualIf => 'kind' in t && t.kind === 'tunnel');
+  if (!tunnels.length) err(ctx, '% Tunnel commands work only on Tunnel interfaces');
+  return tunnels;
+}
+
+function editTunnels(ctx: Ctx, apply: (t: VirtualIf) => void): void {
+  for (const tunnel of tunnelTargets(ctx)) apply(tunnel);
+  mark(ctx);
+}
+
+def(['if'], 'tunnel source <iface:src>', (ctx, a) => editTunnels(ctx, (t) => (t.tunnelSource = a.src as string)), ['router']);
+def(['if'], 'no tunnel source', (ctx) => editTunnels(ctx, (t) => (t.tunnelSource = '')), ['router']);
+def(['if'], 'tunnel destination <ip:dst>', (ctx, a) => editTunnels(ctx, (t) => (t.tunnelDest = a.dst as string)), ['router']);
+def(['if'], 'no tunnel destination', (ctx) => editTunnels(ctx, (t) => (t.tunnelDest = '')), ['router']);
+def(['if'], 'tunnel mode gre ip', (ctx) => editTunnels(ctx, (t) => (t.tunnelMode = 'gre')), ['router']);
+def(['if'], 'tunnel mode ipsec ipv4', (ctx) => editTunnels(ctx, (t) => (t.tunnelMode = 'ipsec')), ['router']);
+def(['if'], 'tunnel protection ipsec profile <word:name>', (ctx, a) => {
+  const name = a.name as string;
+  if (!ctx.device.ipsecProfiles.includes(name)) return err(ctx, `% IPsec profile ${name} not found`);
+  editTunnels(ctx, (t) => (t.tunnelProtection = name));
+}, ['router']);
+def(['if'], 'no tunnel protection ipsec profile <word:name>', (ctx) => editTunnels(ctx, (t) => (t.tunnelProtection = '')), ['router']);
+
+def(['config'], 'crypto isakmp key <word:key> address <ip:peer>', (ctx, a) => {
+  ctx.device.cryptoKeys = [...ctx.device.cryptoKeys.filter((k) => k.peer !== a.peer), { key: a.key as string, peer: a.peer as string }];
+  mark(ctx);
+}, ['router']);
+def(['config'], 'no crypto isakmp key <word:key> address <ip:peer>', (ctx, a) => {
+  ctx.device.cryptoKeys = ctx.device.cryptoKeys.filter((k) => k.peer !== a.peer);
+  mark(ctx);
+}, ['router']);
+def(['config'], 'crypto ipsec profile <word:name>', (ctx, a) => {
+  if (!ctx.device.ipsecProfiles.includes(a.name as string)) {
+    ctx.device.ipsecProfiles.push(a.name as string);
+    mark(ctx);
+  }
+  ctx.session.mode = 'ipsec';
+}, ['router']);
+def(['config'], 'no crypto ipsec profile <word:name>', (ctx, a) => {
+  ctx.device.ipsecProfiles = ctx.device.ipsecProfiles.filter((p) => p !== a.name);
+  for (const vif of ctx.device.vifs) if (vif.tunnelProtection === a.name) vif.tunnelProtection = '';
+  mark(ctx);
+}, ['router']);
+def(['ipsec'], 'set transform-set <word:name>', () => {});
+
+function noRouterIdWarning(ctx: Ctx): void {
+  if (ctx.sim.topo.routerId6(ctx.device) === 0) ctx.out.push(`%OSPFv3-4-NORTRID: Process OSPFv3-${ctx.device.ospf6!.processId}-IPv6 could not pick a router-id, please configure manually`);
+}
+
+def(['config'], 'ipv6 router ospf <num:pid:1-65535>', (ctx, a) => {
+  const pid = a.pid as number;
+  if (!ctx.device.ipv6Routing) return err(ctx, '% IPv6 routing not enabled');
+  if (ctx.device.ospf6 && ctx.device.ospf6.processId !== pid) return err(ctx, '% Only one OSPFv3 process is supported in this simulator');
+  if (!ctx.device.ospf6) {
+    ctx.device.ospf6 = { processId: pid, routerId: '', passive: [], defaultOriginate: false };
+    mark(ctx);
+    noRouterIdWarning(ctx);
+  }
+  ctx.session.mode = 'router6';
+}, [...ROUTERS]);
+def(['config'], 'no ipv6 router ospf <num:pid:1-65535>', (ctx) => {
+  ctx.device.ospf6 = null;
+  for (const cfg of [...ctx.device.ports, ...ctx.device.vifs]) cfg.ospf6Pid = 0;
+  mark(ctx);
+}, [...ROUTERS]);
+def(['router6'], 'router-id <ip:id>', (ctx, a) => {
+  ctx.device.ospf6!.routerId = a.id as string;
+  mark(ctx);
+});
+def(['router6'], 'no router-id', (ctx) => {
+  ctx.device.ospf6!.routerId = '';
+  mark(ctx);
+});
+def(['router6'], 'passive-interface <iface:if>', (ctx, a) => {
+  const ospf6 = ctx.device.ospf6!;
+  if (!ospf6.passive.includes(a.if as string)) ospf6.passive.push(a.if as string);
+  mark(ctx);
+});
+def(['router6'], 'no passive-interface <iface:if>', (ctx, a) => {
+  ctx.device.ospf6!.passive = ctx.device.ospf6!.passive.filter((p) => p !== a.if);
+  mark(ctx);
+});
+def(['router6'], 'default-information originate', (ctx) => {
+  ctx.device.ospf6!.defaultOriginate = true;
+  mark(ctx);
+});
+def(['router6'], 'no default-information originate', (ctx) => {
+  ctx.device.ospf6!.defaultOriginate = false;
+  mark(ctx);
+});
+
+def(['config'], 'ipv6 dhcp pool <word:name>', (ctx, a) => {
+  const name = a.name as string;
+  if (!ctx.device.dhcp6Pools.some((p) => p.name === name)) {
+    ctx.device.dhcp6Pools.push({ name, prefix: '', dns: '', domain: '' });
+    mark(ctx);
+  }
+  ctx.session.pool = name;
+  ctx.session.mode = 'dhcp6';
+}, [...ROUTERS]);
+def(['config'], 'no ipv6 dhcp pool <word:name>', (ctx, a) => {
+  ctx.device.dhcp6Pools = ctx.device.dhcp6Pools.filter((p) => p.name !== a.name);
+  mark(ctx);
+}, [...ROUTERS]);
+function currentPool6(ctx: Ctx) {
+  return ctx.device.dhcp6Pools.find((p) => p.name === ctx.session.pool)!;
+}
+def(['dhcp6'], 'address prefix <ip6p:prefix>', (ctx, a) => {
+  const parsed = parseCidr6(a.prefix as string)!;
+  if (parsed.prefix !== 64) return err(ctx, '% This simulator hands out addresses only from /64 prefixes');
+  currentPool6(ctx).prefix = `${formatIpv6(parsed.addr & ~((1n << 64n) - 1n))}/64`;
+  mark(ctx);
+});
+def(['dhcp6'], 'no address prefix', (ctx) => {
+  currentPool6(ctx).prefix = '';
+  mark(ctx);
+});
+def(['dhcp6'], 'dns-server <ip6:ip>', (ctx, a) => {
+  currentPool6(ctx).dns = formatIpv6(parseIpv6(a.ip as string)!);
+  mark(ctx);
+});
+def(['dhcp6'], 'domain-name <word:d>', (ctx, a) => {
+  currentPool6(ctx).domain = a.d as string;
+  mark(ctx);
+});
 def(IF_MODES, 'no ipv6 enable', (ctx) => forIpv6Targets(ctx, (t) => (t.ipv6Enable = false)), [...ROUTERS]);
 
 def(['subif'], 'encapsulation dot1q <num:v:1-4094>', (ctx, a) => {
@@ -1501,6 +1656,21 @@ const HELP: Record<string, L10n> = {
   repeat: l('Liczba pakietów', 'Specify repeat count'),
   ipv6: l('Polecenia IPv6', 'IPv6 commands'),
   'unicast-routing': l('Włączenie routingu IPv6', 'Enable unicast routing'),
+  server: l('Serwer DHCPv6 na interfejsie', 'Configure DHCPv6 server on this interface'),
+  nd: l('Wykrywanie sąsiadów (ND) i ogłoszenia routera', 'IPv6 interface Neighbor Discovery subcommands'),
+  'managed-config-flag': l('Flaga M: adres z serwera DHCPv6', 'Hosts should use DHCP for address config'),
+  'other-config-flag': l('Flaga O: DNS i domena z DHCPv6', 'Hosts should use DHCP for non-address config'),
+  prefix: l('Prefiks, z którego serwer nadaje adresy', 'Configure IPv6 address prefix'),
+  tunnel: l('Ustawienia tunelu', 'Protocol-over-protocol tunneling'),
+  destination: l('Adres drugiego końca tunelu', 'Destination of tunnel'),
+  gre: l('Tunel GRE bez szyfrowania', 'Generic route encapsulation protocol'),
+  ipsec: l('Szyfrowanie IPsec', 'IPsec tunnel encapsulation'),
+  ipv4: l('Przez sieć IPv4', 'Over IPv4'),
+  protection: l('Ochrona tunelu profilem IPsec', 'Enable tunnel protection'),
+  profile: l('Profil IPsec', 'Determine the ipsec policy profile to use'),
+  isakmp: l('Negocjacja kluczy IKE', 'Configure ISAKMP policy'),
+  sa: l('Skojarzenia bezpieczeństwa', 'Security associations'),
+  'transform-set': l('Zestaw algorytmów szyfrowania', 'Specify list of transform sets in priority order'),
   'eui-64': l('Identyfikator interfejsu z adresu MAC', 'Use eui-64 interface identifier'),
   'port-security': l('Ochrona portu limitem adresów MAC', 'Secure the port with a MAC address limit'),
   maximum: l('Największa liczba adresów MAC', 'Max secure addresses'),

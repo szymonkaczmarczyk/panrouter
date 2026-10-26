@@ -12,7 +12,7 @@ Ruch można też obejrzeć w analizatorze pakietów w stylu Wiresharka i zapisa�
 Sieć można wysłać komuś jednym linkiem, zapisać jako obraz PNG, a całą aplikację zainstalować i używać bez internetu.
 
 Wokół symulatora jest ścieżka nauki: 20 modułów na pięciu poziomach (od laika do eksperta), quizy z wyjaśnieniami,
-23 laboratoria z automatyczną oceną, generator losowych awarii, 10 minigier i egzamin końcowy z częścią praktyczną. Całość działa po polsku,
+25 laboratoriów z automatyczną oceną, laboratoria z linku od prowadzącego, generator losowych awarii, 10 minigier i egzamin końcowy z częścią praktyczną. Całość działa po polsku,
 a jednym przyciskiem przełącza się na angielski. Sprzęt i technologie są aktualne na 2026 rok.
 
 ![Pulpit PanRouter z hasłem kursu, przyciskiem startu i ilustracją sieci](docs/screenshots/01-pulpit.png)
@@ -71,13 +71,16 @@ Każde laboratorium ma w testach jednostkowych skrypt rozwiązania, który udowa
 | `#/` | Pulpit: postęp, ranga, seria dni nauki, poziomy i skróty do ćwiczeń |
 | `#/nauka` | Ścieżka nauki: 5 poziomów, 20 modułów, laboratoria przy każdym poziomie |
 | `#/nauka/:modul` | Lekcja w rozdziałach z diagramami, przykładami CLI i quizem na końcu |
-| `#/laboratoria`, `#/lab/:id` | 23 zadania w symulatorze z instrukcją, podpowiedziami i oceną |
+| `#/laboratoria`, `#/lab/:id` | 25 zadań w symulatorze z instrukcją, podpowiedziami i oceną |
+| `#/lab-z-linku?lab=…` | Laboratorium przygotowane przez prowadzącego: sieć, polecenie i warunki zaliczenia zapisane w linku |
 | `#/awaria` | Generator awarii: losowe usterki w gotowej sieci, zgłoszenia od użytkowników, podpowiedzi i ocena naprawy |
 | `#/symulator` | Własna sieć od zera albo z jednego z 4 szablonów, zapisane sieci, plik, link do sieci i obraz PNG |
 | `#/gry`, `#/gry/:id` | 10 minigier: binarnie, podsieci, porty, OSI, tablica MAC, routing, IPv6, diagnostyka, CLI na czas |
 | `#/quizy`, `#/quiz/:id` | Quizy modułów, szybki miks i powtórka błędów |
+| `#/powtorki` | Powtórki na dziś: błędne pytania i wybrane hasła ze słownika wracają po 1, 3 i 7 dniach |
+| `#/statystyki` | Wykres podejść do egzaminu, tabela wyników, najsłabsze moduły, awarie i powtórki |
 | `#/egzamin` | Egzamin końcowy: 30 pytań w 45 minut i sieć do skonfigurowania |
-| `#/slownik` | 84 pojęcia z wyszukiwarką |
+| `#/slownik` | 88 pojęć z wyszukiwarką i przyciskiem „Powtarzaj” przy każdym haśle |
 | `#/urzadzenia` | Sprzęt 2026 i lista technologii, których już się nie używa |
 | `#/ustawienia` | Język, ograniczenie animacji, terminal, instalacja aplikacji, kopia zapasowa postępu |
 
@@ -105,11 +108,19 @@ Każde laboratorium ma w testach jednostkowych skrypt rozwiązania, który udowa
 - Eksport planszy do PNG w podwójnej rozdzielczości, z osadzonymi fontami projektu.
 - IPv6: adresy statyczne i EUI-64, adresy link-local, SLAAC na komputerach, odkrywanie sąsiadów (NDP), trasy
   statyczne, ping i traceroute po IPv6 w CLI routera i w wierszu poleceń komputera.
+- OSPFv3 (`ipv6 router ospf`, `ipv6 ospf 1 area 0`, `show ipv6 ospf neighbor`) z trasami przez adresy link-local
+  i DHCPv6 stanowe oraz bezstanowe (`ipv6 dhcp pool`, flagi `managed-config-flag` i `other-config-flag`).
+- VPN między oddziałami: tunel `Tunnel0` w trybie IPsec (`crypto isakmp key`, `crypto ipsec profile`,
+  `tunnel protection`) albo GRE. W analizatorze po drodze widać tylko ESP z adresami routerów, a w GRE pakiet
+  ze środka. Różne klucze zostawiają tunel w stanie down (`show crypto isakmp sa`).
 - Analizator pakietów jak w Wiresharku: tabela z kolumnami No., czas, źródło, cel, protokół, długość i info, filtr
-  wyświetlania (`ip.addr == 10.10.10.1 and icmp`, `ipv6`, `tcp.port == 80`, `dropped`), warstwy, zrzut bajtów
+  wyświetlania (`ip.addr == 10.10.10.1 and icmp`, `ipv6`, `esp`, `tcp.port == 80`, `dropped`), warstwy, zrzut bajtów
   i eksport do `.pcap`, który otwiera prawdziwy Wireshark.
 - Praca na planszy: cofanie i ponawianie (Ctrl+Z, Ctrl+Shift+Z), zaznaczanie wielu urządzeń ramką z Shift
   i przesuwanie ich razem, notatki na planszy oraz do 30 zapisanych sieci pod własnymi nazwami.
+- Krótki samouczek przy pierwszym wejściu na pustą planszę: dwa komputery, kabel i ping. Zamyka się sam,
+  gdy ktoś wczyta gotową sieć.
+- Na telefonie panel symulacji jest zwijanym arkuszem, a widok planszy omija podpowiedzi i panele.
 
 **Generator awarii**
 
@@ -117,6 +128,21 @@ Symulator psuje jedną z czterech gotowych sieci (1, 2 albo 3 usterki zależnie 
 zgłaszane przez użytkowników. Usterki obejmują 15 rodzajów, od wyłączonego portu i złego VLAN-u po brakujące trasy,
 listy ACL, pule DHCP i rekordy DNS. Naprawa jest oceniana po działaniu sieci, a nie po cofnięciu konkretnej zmiany,
 więc liczy się każde poprawne rozwiązanie. Ten sam numer zgłoszenia zawsze daje tę samą awarię.
+
+**Nauka i postępy**
+
+- Powtórki rozłożone w czasie: błędna odpowiedź w quizie albo na egzaminie wraca po 1 dniu, dobra przesuwa ją
+  na 3, potem na 7 dni, a po trzech dobrych z rzędu znika. Hasła ze słownika działają jak fiszki z klawiszami
+  1 i 2. Pulpit pokazuje „Na dziś: N powtórek”.
+- Historia egzaminu: każde podejście zapisuje teorię, praktykę i błędy w podziale na moduły. Strona statystyk
+  rysuje wykres podejść z progiem 75% i wskazuje najsłabsze moduły z linkiem do lekcji.
+
+**Laboratorium z linku**
+
+Prowadzący buduje sieć w symulatorze i wybiera Plik, a potem „Zrób z tej sieci laboratorium”. Wpisuje tytuł,
+polecenie i warunki (np. „PC1 pinguje SRV1”, „PC2 nie pinguje 10.0.0.5”, „PC1 otwiera http://…”), sprawdza je
+na swojej sieci i kopiuje link. Osoba ucząca się dostaje tę sieć z instrukcją i przyciskiem „Sprawdź wyniki”,
+a jej praca zapisuje się w przeglądarce osobno dla każdego linku.
 
 **Aplikacja**
 
@@ -147,6 +173,20 @@ więc liczy się każde poprawne rozwiązanie. Ten sam numer zgłoszenia zawsze 
 |---|---|
 | ![Zalewanie zapytania ARP z wyjaśnieniem decyzji i polami ramki](docs/screenshots/06-tryb-symulacji.png) | ![Laboratorium z instrukcją i listą zadań do sprawdzenia](docs/screenshots/07-laboratorium.png) |
 
+### Analiza, awarie i IPv6
+
+| Analizator pakietów | Generator awarii |
+|---|---|
+| ![Analizator z filtrem icmp, listą pakietów, polami ramki i zrzutem bajtów](docs/screenshots/15-analizator.png) | ![Wybór poziomu trudności i numeru zgłoszenia w generatorze awarii](docs/screenshots/16-generator-awarii.png) |
+
+| Zgłoszenie do naprawy | Notatki i zaznaczanie grupy |
+|---|---|
+| ![Zgłoszenie z wynikiem sprawdzenia, podpowiedziami i siecią dwóch oddziałów](docs/screenshots/17-zgloszenie-awarii.png) | ![Plansza z dwiema notatkami i zaznaczonymi komputerami PC1 i PC2](docs/screenshots/18-notatki-i-zaznaczenie.png) |
+
+| Laboratorium IPv6 | VPN IPsec w analizatorze |
+|---|---|
+| ![Wynik show ipv6 interface brief i show ipv6 route w CLI routera](docs/screenshots/19-ipv6-cli.png) | ![Pakiety ESP między routerami oddziałów z zaszyfrowanymi bajtami](docs/screenshots/21-vpn-ipsec.png) |
+
 ### Minigry i biblioteka
 
 | Minigry | Gra „Podsieciowiec” |
@@ -162,6 +202,10 @@ więc liczy się każde poprawne rozwiązanie. Ten sam numer zgłoszenia zawsze 
 | Pulpit | Lekcja |
 |---|---|
 | ![Pulpit na ekranie telefonu z dolną nawigacją](docs/screenshots/13-telefon-pulpit.png) | ![Lekcja o modelu OSI na ekranie telefonu](docs/screenshots/14-telefon-lekcja.png) |
+
+| Symulacja na telefonie |
+|---|
+| ![Plansza nad zwijanym panelem symulacji krok po kroku na ekranie telefonu](docs/screenshots/20-telefon-symulacja.png) |
 
 Wszystkie dane na zrzutach są przykładowe. Adresy pochodzą z zakresów prywatnych i dokumentacyjnych.
 
@@ -179,8 +223,8 @@ npm run dev             # http://127.0.0.1:4400
 | `npm run dev` | Serwer deweloperski Vite na porcie 4400 |
 | `npm run build` | Sprawdzenie typów TypeScript i build do `dist/` |
 | `npm run preview` | Podgląd builda na porcie 4401 |
-| `npm test` | 111 testów jednostkowych (silnik, IPv6, CLI, laboratoria, generator awarii, analizator, treści) |
-| `npm run test:e2e` | 56 testów Playwright z kontrolą dostępności axe, także tryb offline na buildzie |
+| `npm test` | 129 testów jednostkowych (silnik, IPv6, OSPFv3, DHCPv6, VPN, CLI, laboratoria, powtórki, generator awarii, analizator, treści) |
+| `npm run test:e2e` | 74 testy Playwright (komputer i telefon) z kontrolą dostępności axe, także tryb offline na buildzie |
 | `node scripts/assets.mjs` | Ponowne wygenerowanie favicony, ikon aplikacji i obrazu Open Graph |
 
 Projekt nie ma backendu, bazy danych ani zmiennych środowiskowych. Postęp zapisuje się w `localStorage`
@@ -192,6 +236,10 @@ Build w `dist/` to zwykłe pliki statyczne. Routing działa przez `#`, a ścież
 (`base: './'`), więc strona działa na GitHub Pages w podkatalogu repozytorium bez dodatkowej konfiguracji.
 Service worker (`dist/sw.js`) powstaje przy każdym buildzie z listą plików i wersją liczoną z ich zawartości,
 więc po publikacji użytkownicy dostaną komunikat o nowej wersji. W trybie deweloperskim service worker jest wyłączony.
+
+Workflow `.github/workflows/ci.yml` przy każdym pushu i pull requeście sprawdza typy, uruchamia testy jednostkowe,
+build i testy e2e, a z gałęzi `main` publikuje `dist/` na GitHub Pages. W ustawieniach repozytorium
+(Settings, Pages, Source) trzeba raz wybrać „GitHub Actions”.
 
 Docelowy adres to `https://szymonkaczmarczyk.github.io/panrouter/` (ustawiony w `index.html`, `public/robots.txt`
 i `public/sitemap.xml`). Przy zmianie domeny popraw te trzy pliki.
@@ -217,6 +265,7 @@ tests/
 public/             favicon, ikony aplikacji, manifest, obraz Open Graph, robots.txt, sitemap.xml, 404.html
 scripts/            generator ikon i obrazu OG, wtyczka budująca service worker
 docs/screenshots/   zrzuty ekranu używane w README
+.github/workflows/  testy, build i publikacja na GitHub Pages
 ```
 
 ## Bezpieczeństwo i prywatność

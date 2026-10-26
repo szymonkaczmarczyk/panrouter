@@ -94,9 +94,8 @@
   transform: none;
 }
 
-.btn .kbd-hint {
+.btn kbd {
   margin-left: var(--space-1);
-  opacity: 0.75;
 }
 
 .card {

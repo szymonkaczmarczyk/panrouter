@@ -45,6 +45,8 @@ const ECHO_DATA = text.encode('abcdefghijklmnopqrstuvwabcdefghi');
 const TCP_PROTO = 6;
 const UDP_PROTO = 17;
 const ICMP_PROTO = 1;
+const GRE_PROTO = 47;
+const ESP_PROTO = 50;
 
 function mac(value: string): number[] {
   const hex = /^[0-9a-f]{12}$/.test(value) ? value : '000000000000';
@@ -175,7 +177,24 @@ function ipv4Header(src: number, dst: number, proto: number, ttl: number, payloa
   return withChecksum(header, 10, 0);
 }
 
+function espBytes(spi: number, inner: Uint8Array): Uint8Array {
+  const padLength = (4 - ((inner.length + 2) % 4)) % 4;
+  const plain = new Writer().raw(inner).raw(Array.from({ length: padLength }, (_, i) => i + 1)).u8(padLength).u8(4).done();
+  let state = spi || 1;
+  const cipher = plain.map((byte) => {
+    state = (Math.imul(state, 1103515245) + 12345) >>> 0;
+    return byte ^ (state >>> 24);
+  });
+  const icv = Array.from({ length: 12 }, (_, i) => (Math.imul(spi + i, 2654435761) >>> 24) & 0xff);
+  return new Writer().u32(spi).u32(1).raw(Array.from({ length: 16 }, (_, i) => (spi >>> ((i % 4) * 8)) & 0xff)).raw(cipher).raw(icv).done();
+}
+
 function ipv4Bytes(ip: Ipv4Packet, id: number): Uint8Array {
+  if ((ip.proto === 'gre' || ip.proto === 'esp') && ip.inner) {
+    const inner = ipv4Bytes(ip.inner, id);
+    const payload = ip.proto === 'gre' ? new Writer().u16(0).u16(0x0800).raw(inner).done() : espBytes(ip.spi ?? 1, inner);
+    return new Writer().raw(ipv4Header(ip.src, ip.dst, ip.proto === 'gre' ? GRE_PROTO : ESP_PROTO, ip.ttl, payload.length, id)).raw(payload).done();
+  }
   const payload = ip.icmp ? icmpBytes(ip.icmp) : ip.udp ? udpBytes(ip.src, ip.dst, ip.udp) : ip.tcp ? tcpBytes(ip.src, ip.dst, ip.tcp) : new Uint8Array();
   const proto = ip.proto === 'icmp' ? ICMP_PROTO : ip.proto === 'udp' ? UDP_PROTO : TCP_PROTO;
   return new Writer().raw(ipv4Header(ip.src, ip.dst, proto, ip.ttl, payload.length, id)).raw(payload).done();

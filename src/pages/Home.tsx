@@ -1,4 +1,4 @@
-import { ArrowRight, Award, Flame, FlaskConical, Gamepad2, GraduationCap, ListChecks, Network, Trophy } from 'lucide-preact';
+import { ArrowRight, Award, CalendarClock, ChartColumn, Flame, FlaskConical, Gamepad2, GraduationCap, ListChecks, Network, Trophy } from 'lucide-preact';
 import { useEffect } from 'preact/hooks';
 import { setMeta } from '../app/meta';
 import { href } from '../app/router';
@@ -7,6 +7,7 @@ import { plural, t, tr, tx } from '../i18n';
 import type { StringKey } from '../i18n/strings';
 import { labsDone, levelPercent, nextModule, overallPercent } from '../state/learning';
 import { progress, rankIndex, xp } from '../state/progress';
+import { dueCount, nextReviewText } from '../state/reviewStatus';
 import { DeviceShape, categoryColor } from '../sim/ui/DeviceGlyph';
 import type { DeviceKind } from '../sim/types';
 
@@ -69,6 +70,25 @@ const QUICK = [
   { to: '/quizy', icon: ListChecks, title: ['Quizy i powtórki', 'Quizzes and reviews'], text: ['Pytania z każdego modułu i powtórka błędów.', 'Questions from every module and a mistake review.'] },
   { to: '/egzamin', icon: Award, title: ['Egzamin końcowy', 'Final exam'], text: ['Teoria i zadanie praktyczne w symulatorze, ocena automatyczna.', 'Theory and a practical simulator task, graded automatically.'] },
 ];
+
+function ReviewToday() {
+  const due = dueCount();
+  return (
+    <section class="card review-today" aria-label={tx('Powtórki', 'Reviews')}>
+      <CalendarClock aria-hidden="true" class="bento-icon" />
+      <div class="stack">
+        <h4>{due ? tx(`Na dziś: ${plural(due, { pl: ['powtórka', 'powtórki', 'powtórek'], en: ['review', 'reviews'] })}`, `For today: ${plural(due, { pl: ['powtórka', 'powtórki', 'powtórek'], en: ['review', 'reviews'] })}`) : tx('Na dziś brak powtórek', 'No reviews for today')}</h4>
+        <p class="muted small">{due ? tx('Pytania z błędami i hasła ze słownika, które wracają po 1, 3 i 7 dniach.', 'Wrong questions and glossary terms that come back after 1, 3 and 7 days.') : nextReviewText()}</p>
+      </div>
+      {due > 0 && (
+        <a class="btn btn-primary" href={href('/powtorki')}>
+          {tx('Powtórz teraz', 'Review now')}
+          <ArrowRight aria-hidden="true" />
+        </a>
+      )}
+    </section>
+  );
+}
 
 export function Home() {
   useEffect(() => setMeta(t('meta.home'), t('meta.homeDesc')), []);
@@ -140,6 +160,15 @@ export function Home() {
           <span class="dim">{tx('zaliczone na 100%', 'completed at 100%')}</span>
         </div>
       </section>
+
+      <div class="stats-more">
+        <a class="btn btn-ghost btn-sm" href={href('/statystyki')}>
+          <ChartColumn aria-hidden="true" />
+          {tx('Wszystkie statystyki', 'All statistics')}
+        </a>
+      </div>
+
+      {Object.keys(p.reviews).length > 0 && <ReviewToday />}
 
       <section class="section">
         <div class="section-head">

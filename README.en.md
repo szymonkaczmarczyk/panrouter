@@ -12,7 +12,7 @@ Wireshark-style packet analyzer and saved to a `.pcap` file. You can send a netw
 one link, save it as a PNG image, and install the whole app and use it without internet.
 
 Around the simulator there is a learning path: 20 modules on five levels (from beginner to expert), quizzes with
-explanations, 23 auto-graded labs, a random fault generator, 10 minigames and a final exam with a practical part. Everything works in Polish,
+explanations, 25 auto-graded labs, labs shared as a link by an instructor, a random fault generator, 10 minigames and a final exam with a practical part. Everything works in Polish,
 and one button switches it to English. Hardware and technologies are up to date for 2026.
 
 ![PanRouter dashboard with the course tagline, a start button and a network illustration](docs/screenshots/01-pulpit.png)
@@ -70,13 +70,16 @@ solution script in the unit tests that proves it can be passed.
 | `#/` | Dashboard: progress, rank, learning streak, levels and shortcuts to exercises |
 | `#/nauka` | Learning path: 5 levels, 20 modules, labs at every level |
 | `#/nauka/:modul` | A lesson in chapters with diagrams, CLI examples and a quiz at the end |
-| `#/laboratoria`, `#/lab/:id` | 23 tasks in the simulator with instructions, hints and grading |
+| `#/laboratoria`, `#/lab/:id` | 25 tasks in the simulator with instructions, hints and grading |
+| `#/lab-z-linku?lab=…` | A lab prepared by an instructor: the network, task and pass conditions stored in the link |
 | `#/awaria` | Fault generator: random faults in a ready network, user tickets, hints and a graded fix |
 | `#/symulator` | Your own network from scratch or from one of 4 templates, saved networks, file, network link and PNG image |
 | `#/gry`, `#/gry/:id` | 10 minigames: binary, subnets, ports, OSI, MAC table, routing, IPv6, troubleshooting, timed CLI |
 | `#/quizy`, `#/quiz/:id` | Module quizzes, a quick mix and a mistakes review |
+| `#/powtorki` | Reviews for today: wrong questions and chosen glossary terms come back after 1, 3 and 7 days |
+| `#/statystyki` | A chart of exam attempts, a results table, weakest modules, faults and reviews |
 | `#/egzamin` | Final exam: 30 questions in 45 minutes and a network to configure |
-| `#/slownik` | 84 terms with search |
+| `#/slownik` | 88 terms with search and a “Review” button next to every term |
 | `#/urzadzenia` | 2026 hardware and a list of technologies that are no longer used |
 | `#/ustawienia` | Language, reduced motion, terminal, app install, progress backup |
 
@@ -103,11 +106,19 @@ solution script in the unit tests that proves it can be passed.
 - Canvas export to PNG at double resolution, with the project fonts embedded.
 - IPv6: static and EUI-64 addresses, link-local addresses, SLAAC on computers, neighbor discovery (NDP), static routes,
   IPv6 ping and traceroute in the router CLI and the computer command line.
+- OSPFv3 (`ipv6 router ospf`, `ipv6 ospf 1 area 0`, `show ipv6 ospf neighbor`) with routes via link-local addresses,
+  and stateful and stateless DHCPv6 (`ipv6 dhcp pool`, the `managed-config-flag` and `other-config-flag` flags).
+- VPN between branches: a `Tunnel0` interface in IPsec mode (`crypto isakmp key`, `crypto ipsec profile`,
+  `tunnel protection`) or GRE. The analyzer shows only ESP with router addresses on the way, and the inner packet
+  for GRE. Different keys leave the tunnel down (`show crypto isakmp sa`).
 - Wireshark-style packet analyzer: a table with No., time, source, destination, protocol, length and info, a display
-  filter (`ip.addr == 10.10.10.1 and icmp`, `ipv6`, `tcp.port == 80`, `dropped`), layers, a byte dump and `.pcap`
+  filter (`ip.addr == 10.10.10.1 and icmp`, `ipv6`, `esp`, `tcp.port == 80`, `dropped`), layers, a byte dump and `.pcap`
   export that real Wireshark opens.
 - Canvas work: undo and redo (Ctrl+Z, Ctrl+Shift+Z), selecting several devices with a Shift box and moving them
   together, notes on the canvas and up to 30 saved networks under your own names.
+- A short tutorial on the first visit to an empty canvas: two computers, a cable and a ping. It closes itself when
+  someone loads a ready network.
+- On a phone the simulation panel is a collapsible sheet, and fitting the view keeps clear of hints and panels.
 
 **Fault generator**
 
@@ -115,6 +126,21 @@ The simulator breaks one of four ready networks (1, 2 or 3 faults depending on d
 report. Faults cover 15 kinds, from a shut port and a wrong VLAN to missing routes, ACLs, DHCP pools and DNS records.
 The fix is graded by how the network works, not by undoing a specific change, so any correct solution counts. The same
 ticket number always gives the same fault.
+
+**Learning and progress**
+
+- Spaced reviews: a wrong answer in a quiz or the exam comes back after 1 day, a right one moves it to 3 and then
+  7 days, and after three right answers in a row it leaves. Glossary terms work as flashcards with keys 1 and 2.
+  The dashboard shows “For today: N reviews”.
+- Exam history: every attempt saves theory, practice and mistakes per module. The statistics page draws a chart of
+  attempts with the 75% pass line and lists the weakest modules with a link to the lesson.
+
+**Lab from a link**
+
+An instructor builds a network in the simulator and chooses File, then “Turn this network into a lab”. They enter a
+title, a task and conditions (e.g. “PC1 pings SRV1”, “PC2 cannot ping 10.0.0.5”, “PC1 opens http://…”), check them
+on their network and copy the link. The learner gets that network with instructions and a “Check results” button,
+and their work is saved in the browser separately for each link.
 
 **App**
 
@@ -145,6 +171,20 @@ ticket number always gives the same fault.
 |---|---|
 | ![ARP request flooding with a decision explanation and frame fields](docs/screenshots/06-tryb-symulacji.png) | ![Lab with instructions and a checklist of tasks](docs/screenshots/07-laboratorium.png) |
 
+### Analysis, faults and IPv6
+
+| Packet analyzer | Fault generator |
+|---|---|
+| ![Analyzer with an icmp filter, packet list, frame fields and a byte dump](docs/screenshots/15-analizator.png) | ![Difficulty and ticket number selection in the fault generator](docs/screenshots/16-generator-awarii.png) |
+
+| Ticket to fix | Notes and group selection |
+|---|---|
+| ![Ticket with check results, hints and a two-branch network](docs/screenshots/17-zgloszenie-awarii.png) | ![Canvas with two notes and PC1 and PC2 selected](docs/screenshots/18-notatki-i-zaznaczenie.png) |
+
+| IPv6 lab | IPsec VPN in the analyzer |
+|---|---|
+| ![show ipv6 interface brief and show ipv6 route output in the router CLI](docs/screenshots/19-ipv6-cli.png) | ![ESP packets between branch routers with encrypted bytes](docs/screenshots/21-vpn-ipsec.png) |
+
 ### Minigames and library
 
 | Minigames | The "Subnetter" game |
@@ -160,6 +200,10 @@ ticket number always gives the same fault.
 | Dashboard | Lesson |
 |---|---|
 | ![Dashboard on a phone screen with bottom navigation](docs/screenshots/13-telefon-pulpit.png) | ![OSI model lesson on a phone screen](docs/screenshots/14-telefon-lekcja.png) |
+
+| Simulation on a phone |
+|---|
+| ![Canvas above the collapsible step-by-step simulation panel on a phone screen](docs/screenshots/20-telefon-symulacja.png) |
 
 All data in the screenshots is sample data. Addresses come from private and documentation ranges. The screenshots show
 the Polish version of the interface.
@@ -178,8 +222,8 @@ npm run dev             # http://127.0.0.1:4400
 | `npm run dev` | Vite dev server on port 4400 |
 | `npm run build` | TypeScript type check and build to `dist/` |
 | `npm run preview` | Build preview on port 4401 |
-| `npm test` | 111 unit tests (engine, IPv6, CLI, labs, fault generator, analyzer, content) |
-| `npm run test:e2e` | 56 Playwright tests with axe accessibility checks, including offline mode on the build |
+| `npm test` | 129 unit tests (engine, IPv6, OSPFv3, DHCPv6, VPN, CLI, labs, reviews, fault generator, analyzer, content) |
+| `npm run test:e2e` | 74 Playwright tests (desktop and phone) with axe accessibility checks, including offline mode on the build |
 | `node scripts/assets.mjs` | Regenerates the favicon, app icons and Open Graph image |
 
 The project has no backend, database or environment variables. Progress is stored in the browser's `localStorage`,
@@ -191,6 +235,10 @@ The build in `dist/` is plain static files. Routing works through `#`, and asset
 the site works on GitHub Pages in a repository subfolder with no extra configuration. The service worker
 (`dist/sw.js`) is generated on every build with a file list and a version computed from their content, so after
 publishing users get a new version notice. In dev mode the service worker is disabled.
+
+The `.github/workflows/ci.yml` workflow checks types, runs unit tests, the build and e2e tests on every push and pull
+request, and publishes `dist/` to GitHub Pages from the `main` branch. In the repository settings (Settings, Pages,
+Source) choose “GitHub Actions” once.
 
 The target address is `https://szymonkaczmarczyk.github.io/panrouter/` (set in `index.html`, `public/robots.txt` and
 `public/sitemap.xml`). If the domain changes, update these three files.
@@ -216,6 +264,7 @@ tests/
 public/             favicon, app icons, manifest, Open Graph image, robots.txt, sitemap.xml, 404.html
 scripts/            icon and OG image generator, service worker build plugin
 docs/screenshots/   screenshots used in the README
+.github/workflows/  tests, build and GitHub Pages deployment
 ```
 
 ## Security and privacy

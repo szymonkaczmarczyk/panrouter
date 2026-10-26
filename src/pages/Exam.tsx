@@ -1,10 +1,12 @@
-import { Award, CircleCheck, CircleX, ClipboardCheck, Clock, ListChecks, Network } from 'lucide-preact';
+import { Award, ChartColumn, CircleCheck, CircleX, ClipboardCheck, Clock, ListChecks, Network } from 'lucide-preact';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { setMeta } from '../app/meta';
 import { href } from '../app/router';
 import { Blocks } from '../content/Blocks';
+import { MODULES } from '../content';
 import { EXAM, EXAM_LAB, pickTheory } from '../content/exam';
 import { makeLabContext } from '../content/labs/context';
+import type { Question } from '../content/types';
 import { lang, t, tr, tx } from '../i18n';
 import { SimController } from '../sim/ui/controller';
 import { Workspace } from '../sim/ui/Workspace';
@@ -66,10 +68,24 @@ function Practical({ onDone }: { onDone: (percent: number, results: boolean[]) =
   );
 }
 
+function moduleBreakdown(questions: Question[], wrong: string[]): Record<string, [number, number]> {
+  const owner = new Map(MODULES.flatMap((m) => m.quiz.map((q) => [q.id, m.id] as const)));
+  const missed = new Set(wrong);
+  const result: Record<string, [number, number]> = {};
+  for (const q of questions) {
+    const id = owner.get(q.id);
+    if (!id) continue;
+    const [asked, misses] = result[id] ?? [0, 0];
+    result[id] = [asked + 1, misses + (missed.has(q.id) ? 1 : 0)];
+  }
+  return result;
+}
+
 export function ExamPage() {
   const [stage, setStage] = useState<Stage>('intro');
   const [seed, setSeed] = useState(() => Date.now() % 100000);
   const [theory, setTheory] = useState(0);
+  const [theoryWrong, setTheoryWrong] = useState<string[]>([]);
   const [practical, setPractical] = useState(0);
   const [practicalResults, setPracticalResults] = useState<boolean[]>([]);
   const questions = useMemo(() => pickTheory(seed), [seed]);
@@ -95,7 +111,10 @@ export function ExamPage() {
           mode="exam"
           timeLimit={EXAM.theoryMinutes * 60}
           pass={EXAM.passMark}
-          onFinish={(result) => setTheory(result.percent)}
+          onFinish={(result) => {
+            setTheory(result.percent);
+            setTheoryWrong(result.wrong);
+          }}
           resultExtra={() => (
             <button type="button" class="btn btn-primary btn-lg" onClick={() => setStage('practical')}>
               <Network aria-hidden="true" />
@@ -114,7 +133,7 @@ export function ExamPage() {
           setPractical(percent);
           setPracticalResults(results);
           const final = Math.round(theory * EXAM.theoryWeight + percent * EXAM.practicalWeight);
-          recordExam({ theory, practical: percent, total: final, passed: final >= EXAM.passMark });
+          recordExam({ theory, practical: percent, total: final, passed: final >= EXAM.passMark, modules: moduleBreakdown(questions, theoryWrong), wrong: theoryWrong });
           setStage('result');
         }}
       />
@@ -149,8 +168,12 @@ export function ExamPage() {
             >
               {tx('Podejdź jeszcze raz', 'Retake the exam')}
             </button>
-            <a class="btn btn-ghost" href={href('/quiz/powtorka')}>
-              {tx('Powtórka błędów', 'Mistake review')}
+            <a class="btn" href={href('/statystyki')}>
+              <ChartColumn aria-hidden="true" />
+              {tx('Statystyki podejść', 'Attempt statistics')}
+            </a>
+            <a class="btn btn-ghost" href={href('/powtorki')}>
+              {tx('Błędne pytania wrócą w powtórkach', 'Wrong questions come back in reviews')}
             </a>
           </div>
         </div>
@@ -185,7 +208,15 @@ export function ExamPage() {
         <div class="progress progress-ok">
           <span style={{ width: `${ready}%` }} />
         </div>
-        {exam.attempts > 0 && <p class="muted small">{tx(`Liczba podejść: ${exam.attempts}. Najlepszy wynik: ${exam.best}%.`, `Attempts: ${exam.attempts}. Best score: ${exam.best}%.`)}</p>}
+        {exam.attempts > 0 && (
+          <p class="row-wrap muted small">
+            {tx(`Liczba podejść: ${exam.attempts}. Najlepszy wynik: ${exam.best}%.`, `Attempts: ${exam.attempts}. Best score: ${exam.best}%.`)}
+            <a class="btn btn-sm btn-ghost" href={href('/statystyki')}>
+              <ChartColumn aria-hidden="true" />
+              {tx('Historia i najsłabsze moduły', 'History and weakest modules')}
+            </a>
+          </p>
+        )}
         <div class="row-wrap">
           <button type="button" class="btn btn-primary btn-lg" onClick={() => setStage('theory')}>
             <Award aria-hidden="true" />

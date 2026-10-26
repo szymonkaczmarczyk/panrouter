@@ -133,3 +133,77 @@ describe('IPv6 w CLI', () => {
     expect(config).toContain('ipv6 route ::/0 2001:DB8:1::FE');
   });
 });
+
+describe('OSPFv3 i DHCPv6', () => {
+  async function build() {
+    const { cliExecute, newSession } = await import('../../src/sim/cli/ios');
+    const b = new NetBuilder();
+    const r1 = b.add('router', 'R1', 0, 0);
+    const r2 = b.add('router', 'R2', 0, 0);
+    const sw1 = b.add('switch', 'SW1', 0, 0);
+    const sw2 = b.add('switch', 'SW2', 0, 0);
+    const pc1 = b.add('pc', 'PC1', 0, 0);
+    const pc2 = b.add('pc', 'PC2', 0, 0);
+    b.link(r1, 'Gi0/0/0', sw1, 'Gi1/0/24').link(r2, 'Gi0/0/0', sw2, 'Gi1/0/24').link(r1, 'Gi0/0/1', r2, 'Gi0/0/1');
+    b.link(pc1, 'eth0', sw1, 'Gi1/0/1').link(pc2, 'eth0', sw2, 'Gi1/0/1');
+    const sim = new Simulator(b.net);
+    const run = (device: typeof r1, lines: string[]) => {
+      const session = newSession(device.id);
+      const out: string[] = [];
+      for (const line of ['enable', 'conf t', ...lines, 'end']) {
+        const result = cliExecute(sim, session, line);
+        out.push(...result.lines);
+        if (result.changed) sim.invalidate();
+      }
+      return out.join('\n');
+    };
+    return { sim, run, r1, r2, pc1, pc2, cliExecute, newSession };
+  }
+
+  it('OSPFv3 bez router-id nie startuje, a po ustawieniu uczy się tras przez link-local', async () => {
+    const { sim, run, r1, r2, pc1, pc2 } = await build();
+    const r1Out = run(r1, ['ipv6 unicast-routing', 'int g0/0/0', 'no shut', 'ipv6 address 2001:db8:1::1/64', 'ipv6 ospf 1 area 0', 'int g0/0/1', 'no shut', 'ipv6 address 2001:db8:12::1/64', 'ipv6 ospf 1 area 0']);
+    expect(r1Out).toContain('%OSPFv3-4-NORTRID');
+    run(r2, ['ipv6 unicast-routing', 'ipv6 router ospf 1', 'router-id 2.2.2.2', 'passive-interface GigabitEthernet0/0/0', 'int g0/0/0', 'no shut', 'ipv6 address 2001:db8:2::1/64', 'ipv6 ospf 1 area 0', 'int g0/0/1', 'no shut', 'ipv6 address 2001:db8:12::2/64', 'ipv6 ospf 1 area 0']);
+    const target = sim.topo.ip6Ifs(pc2)[0].addrs.find((a) => a.origin === 'slaac')!.addr;
+    expect(sim.topo.routes6(r1).some((r) => r.code === 'O')).toBe(false);
+    expect(sim.canReach6(pc1.id, target)).toBe(false);
+    run(r1, ['ipv6 router ospf 1', 'router-id 1.1.1.1']);
+    const learned = sim.topo.routes6(r1).find((r) => r.code === 'O' && formatIpv6(r.net) === '2001:db8:2::')!;
+    expect(learned.via).toBe(linkLocal(portByName(r2, 'Gi0/0/1').mac));
+    expect(learned.ifName).toBe('GigabitEthernet0/0/1');
+    expect(sim.canReach6(pc1.id, target)).toBe(true);
+    const neighbors = run(r1, ['do show ipv6 ospf neighbor']);
+    const show = (await import('../../src/sim/cli/show')).showOspf6Neighbors(sim, r1).join('\n');
+    expect(neighbors.length).toBeGreaterThan(0);
+    expect(show).toContain('2.2.2.2');
+    expect(show).toContain('FULL/');
+    const config = (await import('../../src/sim/cli/show')).runningConfig(sim, r2).join('\n');
+    expect(config).toContain(' ipv6 ospf 1 area 0');
+    expect(config).toContain('ipv6 router ospf 1');
+    expect(config).toContain(' passive-interface GigabitEthernet0/0/0');
+    const routes = (await import('../../src/sim/cli/show')).showIpv6Route(sim, r1).join('\n');
+    expect(routes).toMatch(/O {3}2001:DB8:2::\/64 \[110\/\d+\]/);
+  });
+
+  it('DHCPv6 daje adres przy fladze M, a sam DNS przy fladze O', async () => {
+    const { sim, run, r1, pc1 } = await build();
+    run(r1, ['ipv6 unicast-routing', 'ipv6 dhcp pool BIURO6', 'address prefix 2001:db8:1::/64', 'dns-server 2001:db8:1::53', 'domain-name firma.lan', 'int g0/0/0', 'no shut', 'ipv6 address 2001:db8:1::1/64', 'ipv6 dhcp server BIURO6', 'ipv6 nd other-config-flag']);
+    let ifs = sim.topo.ip6Ifs(pc1)[0];
+    expect(ifs.addrs.some((a) => a.origin === 'dhcpv6')).toBe(false);
+    expect(ifs.dns6).toBe(v6('2001:db8:1::53'));
+    run(r1, ['int g0/0/0', 'ipv6 nd managed-config-flag']);
+    ifs = sim.topo.ip6Ifs(pc1)[0];
+    const leased = ifs.addrs.find((a) => a.origin === 'dhcpv6')!;
+    expect(inSubnet6(leased.addr, v6('2001:db8:1::'), 64)).toBe(true);
+    expect(leased.prefix).toBe(128);
+    expect(sim.canReach6(pc1.id, v6('2001:db8:1::1'))).toBe(true);
+    expect(sim.canReach6(r1.id, leased.addr)).toBe(true);
+    const config = (await import('../../src/sim/cli/show')).runningConfig(sim, r1).join('\n');
+    expect(config).toContain('ipv6 dhcp pool BIURO6');
+    expect(config).toContain(' address prefix 2001:DB8:1::/64');
+    expect(config).toContain(' ipv6 nd managed-config-flag');
+    expect(config).toContain(' ipv6 dhcp server BIURO6');
+    expect(run(r1, ['ipv6 dhcp pool X', 'address prefix 2001:db8:5::/48'])).toContain('only from /64');
+  });
+});
